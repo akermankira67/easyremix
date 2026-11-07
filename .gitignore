@@ -6,3 +6,8 @@ bin/
 *.egg-info/
 .pytest_cache/
 easyremix-selftest.txt
+# Android build (android/build.sh copies the engine and icon next to main.py)
+android/.buildozer/
+android/bin/
+android/easyremix/
+android/icon.png

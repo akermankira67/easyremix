@@ -9,8 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
-from scipy.signal import resample_poly
 
+from .backend import fx as _fx
 from .theory import Key
 
 # Krumhansl & Kessler (1982) probe-tone profiles
@@ -31,9 +31,9 @@ def _mono_downsampled(audio: np.ndarray, sr: int, max_seconds: float = 240) -> n
     mono = audio.mean(axis=0) if audio.ndim == 2 else audio
     mono = mono[: int(max_seconds * sr)]
     if sr == 44100:
-        mono = resample_poly(mono, 1, 4)
+        mono = _fx.resample(mono, 1, 4)
     elif sr != ANALYSIS_SR:
-        mono = resample_poly(mono, ANALYSIS_SR, sr)
+        mono = _fx.resample(mono, ANALYSIS_SR, sr)
     return mono.astype(np.float32)
 
 

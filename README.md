@@ -32,9 +32,9 @@ Because nothing has to be unpacked at launch, the window opens in about half a s
 * **From GitHub Actions:** every push runs the *Build Windows EXE* workflow. Open the run,
   download the `EasyRemix-windows` artifact, unzip it anywhere and start `EasyRemix.exe`. To publish a
   release, open *Actions → Build Windows EXE → Run workflow* and enter a version such as `0.3`.
-  The workflow builds the Windows exe and the Linux app, creates the tag `v0.3` and a GitHub
-  Release with `EasyRemix-windows.zip`, `EasyRemix-x86_64.AppImage` and
-  `EasyRemix-linux-x86_64.tar.gz`. Pushing a `v*` tag does the same.
+  The workflow builds the Windows exe, the Linux app and the Android APK, creates the tag `v0.3`
+  and a GitHub Release with `EasyRemix-windows.zip`, `EasyRemix-x86_64.AppImage`,
+  `EasyRemix-linux-x86_64.tar.gz` and `EasyRemix-android-arm64.apk`. Pushing a `v*` tag does the same.
 * **Build it yourself on Windows:** install Python 3.12 from python.org, then double-click
   `build.bat`. The result is the folder `dist\EasyRemix\`.
 
@@ -69,6 +69,25 @@ to check every built-in component.
 To build it yourself: `sudo apt install python3-tk python3-venv libportaudio2`, then run
 `sh build_linux.sh`. The result is `dist/EasyRemix/` and `dist/EasyRemix-linux-x86_64.tar.gz`
 (plus the AppImage if `appimagetool` is on your PATH).
+
+## Android
+
+`EasyRemix-android-arm64.apk` is the phone version (Android 7 or newer, 64-bit ARM, which is
+practically every phone from the last years). It has the same three tabs (Download, Extract,
+Remix) with a touch interface, and uses the same engine as the desktop app.
+
+To install it, open the APK on the phone and allow installing apps from that source when
+Android asks. The APK is not from the Play Store, so Android shows a warning; that is expected
+for apps you install yourself.
+
+* Downloads, extracted audio and remixes are saved to the phone's shared folders,
+  `Music/EasyRemix` (audio) and `Movies/EasyRemix` (video), so music and gallery apps find them.
+* Remix effects are computed with numpy on the phone (the desktop uses pedalboard), so they
+  can sound slightly different. Exporting a long song with many effects can take a minute.
+* Preview plays a 25-second part, like on the desktop.
+
+Build it yourself on Linux: install Java 17 and buildozer (see the `android-apk` job in
+`.github/workflows/build.yml`), then run `sh android/build.sh`. The first build takes about an hour.
 
 ## The speed / key math
 

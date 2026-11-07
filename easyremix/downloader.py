@@ -5,7 +5,8 @@ import os
 import time
 from typing import Callable
 
-from .tools import deno_path, ffmpeg_path
+from . import tools
+from .tools import deno_path
 
 QUALITIES = {
     "Best available": "bestvideo*+bestaudio/best",
@@ -13,6 +14,16 @@ QUALITIES = {
     "720p": "bestvideo*[height<=720]+bestaudio/best[height<=720]",
     "480p": "bestvideo*[height<=480]+bestaudio/best[height<=480]",
 }
+
+# Without any ffmpeg program video and audio can't be merged, so only formats that
+# already contain both are used. On YouTube these single-file formats go up to 360p.
+SINGLE_FILE_QUALITIES = {
+    "Best available": "best[vcodec!=none][acodec!=none][ext=mp4]/best[vcodec!=none][acodec!=none]",
+    "1080p": "best[height<=1080][vcodec!=none][acodec!=none][ext=mp4]/best[height<=1080][acodec!=none]",
+    "720p": "best[height<=720][vcodec!=none][acodec!=none][ext=mp4]/best[height<=720][acodec!=none]",
+    "480p": "best[height<=480][vcodec!=none][acodec!=none][ext=mp4]/best[height<=480][acodec!=none]",
+}
+SINGLE_FILE_AUDIO = "bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio/best"
 
 
 # --- reliability settings for slow / unstable / throttled connections -------------------
@@ -98,9 +109,11 @@ def download(
             if path:
                 result["path"] = path
 
+    has_ffmpeg = tools.ffmpeg_available()
+    # Android: no full ffmpeg, but its ffmpeg program can still merge video + audio
+    merger = None if has_ffmpeg else tools.merge_ffmpeg_path()
     opts: dict = {
         "outtmpl": os.path.join(out_dir, "%(title).150B [%(id)s].%(ext)s"),
-        "ffmpeg_location": ffmpeg_path(),
         "noplaylist": True,
         "progress_hooks": [hook],
         "postprocessor_hooks": [post_hook],
@@ -122,6 +135,10 @@ def download(
         "continuedl": True,
         "keep_fragments": False,
     }
+    if has_ffmpeg:
+        opts["ffmpeg_location"] = tools.ffmpeg_path()
+    elif merger:
+        opts["ffmpeg_location"] = merger
     if cookies_browser:
         # lets age-restricted / members-only videos work using the user's own login
         opts["cookiesfrombrowser"] = (cookies_browser.lower(),)
@@ -129,7 +146,11 @@ def download(
     if deno:
         opts["js_runtimes"] = {"deno": {"path": deno}}
 
-    if audio_only:
+    if not has_ffmpeg and (audio_only or not merger):
+        # no merging / converting by yt-dlp; audio is turned into mp3 with PyAV afterwards
+        opts["format"] = SINGLE_FILE_AUDIO if audio_only else SINGLE_FILE_QUALITIES.get(
+            quality, SINGLE_FILE_QUALITIES["Best available"])
+    elif audio_only:
         opts["format"] = "bestaudio/best"
         opts["postprocessors"] = [{
             "key": "FFmpegExtractAudio",
@@ -151,6 +172,8 @@ def download(
                 if not path:
                     path = (info.get("requested_downloads", [{}])[0].get("filepath")
                             or ydl.prepare_filename(info))
+            if audio_only and not has_ffmpeg and not path.lower().endswith(".mp3"):
+                path = _convert_to_mp3(path, on_progress)
             return path
         except yt_dlp.utils.DownloadError as exc:
             message = str(exc)
@@ -164,6 +187,21 @@ def download(
             if on_progress:
                 on_progress(0.0, f"Connection lost - continuing in {wait} s ({attempt}/{resume_attempts})")
             sleep(wait)
+
+
+def _convert_to_mp3(path: str, on_progress: Callable[[float, str], None] | None) -> str:
+    """Turn a downloaded audio file into mp3 without the ffmpeg program (PyAV)."""
+    from .audio_io import load_audio, save_audio
+
+    if on_progress:
+        on_progress(1.0, "Converting to mp3...")
+    out = os.path.splitext(path)[0] + ".mp3"
+    save_audio(load_audio(path), out)
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+    return out
 
 
 class DownloadFailed(RuntimeError):

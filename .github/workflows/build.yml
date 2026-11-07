@@ -1,5 +1,6 @@
 name: Build Windows EXE
-# Builds the Windows folder (EXE) and the Linux AppImage / tar.gz; publishes both on a release.
+# Builds the Windows folder (EXE), the Linux AppImage / tar.gz and the Android APK;
+# a release publishes all of them.
 
 on:
   push:
@@ -27,8 +28,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -r requirements.txt pytest
-      - run: pytest -q tests
+      - run: pip install -r requirements.txt pytest av
+      - name: Tests (desktop engine)
+        run: pytest -q tests
+      - name: Tests (Android engine - numpy DSP, PyAV audio)
+        env:
+          EASYREMIX_DSP: numpy
+          EASYREMIX_AUDIO: pyav
+        run: pytest -q tests
 
   windows-exe:
     needs: test
@@ -141,9 +148,58 @@ jobs:
             dist/EasyRemix-x86_64.AppImage
             dist/EasyRemix-linux-x86_64.tar.gz
 
+  android-apk:
+    needs: test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git zip unzip autoconf automake libtool pkg-config cmake \
+            zlib1g-dev libncurses-dev libffi-dev libssl-dev lld nasm ccache
+          pip install buildozer==1.6.0 cython==3.1.8 setuptools
+
+      # SDK/NDK downloads and finished recipe builds; the first build takes about an hour
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.buildozer
+            android/.buildozer
+          key: buildozer-${{ hashFiles('android/buildozer.spec') }}-v1
+          restore-keys: buildozer-
+
+      - name: Build APK
+        run: sh android/build.sh
+
+      - name: Collect APK
+        run: |
+          mkdir -p dist
+          cp android/bin/*.apk dist/EasyRemix-android-arm64.apk
+          ls -l dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EasyRemix-android
+          path: dist/EasyRemix-android-arm64.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-android
+          path: dist/EasyRemix-android-arm64.apk
+
   # Runs for a pushed v* tag, or a manual run with a version (creates the tag itself).
   release:
-    needs: [windows-exe, linux-app]
+    needs: [windows-exe, linux-app, android-apk]
     if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.version != ''
     runs-on: ubuntu-latest
     steps:

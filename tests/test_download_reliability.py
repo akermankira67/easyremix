@@ -212,3 +212,65 @@ def test_permanent_errors_are_not_retried():
     assert not downloader.is_retryable("ERROR: Unsupported URL: https://example.com")
     assert downloader.is_retryable("ERROR: [download] Got error: HTTP Error 503: Service Unavailable")
     assert downloader.is_retryable("Read timed out. (read timeout=20.0)")
+
+
+def _capture_opts(monkeypatch, filepath="x.mp4"):
+    captured = {}
+
+    class FakeYDL:
+        def __init__(self, opts):
+            captured.update(opts)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def extract_info(self, url, download):
+            return {"requested_downloads": [{"filepath": filepath}]}
+
+    import yt_dlp
+
+    monkeypatch.setattr(yt_dlp, "YoutubeDL", FakeYDL)
+    return captured
+
+
+def test_without_ffmpeg_only_single_file_formats(monkeypatch):
+    """Without any ffmpeg program nothing may need merging or converting by yt-dlp."""
+    monkeypatch.setattr(downloader.tools, "ffmpeg_available", lambda: False)
+    monkeypatch.setattr(downloader.tools, "merge_ffmpeg_path", lambda: None)
+    captured = _capture_opts(monkeypatch)
+    downloader.download("https://example.com/v", "/tmp", quality="720p")
+    assert "ffmpeg_location" not in captured
+    assert "postprocessors" not in captured and "merge_output_format" not in captured
+    assert "+" not in captured["format"]  # no "video+audio" merge
+    assert "[acodec!=none]" in captured["format"]
+
+
+def test_without_ffmpeg_audio_is_converted_to_mp3(monkeypatch, tmp_path):
+    pytest.importorskip("av")
+    import numpy as np
+
+    from easyremix import audio_io
+
+    monkeypatch.setattr(downloader.tools, "ffmpeg_available", lambda: False)
+    monkeypatch.setattr(downloader.tools, "merge_ffmpeg_path", lambda: "/app/lib/libffmpegbin.so")
+    monkeypatch.setenv("EASYREMIX_AUDIO", "pyav")
+    m4a = str(tmp_path / "song [abc].m4a")
+    audio_io.save_audio(np.zeros((2, 44100), np.float32), m4a)
+    captured = _capture_opts(monkeypatch, filepath=m4a)
+    path = downloader.download("https://example.com/v", str(tmp_path), audio_only=True)
+    assert captured["format"].startswith("bestaudio")
+    assert path.endswith(".mp3") and os.path.isfile(path) and not os.path.exists(m4a)
+
+
+def test_android_ffmpeg_program_is_used_for_merging_video(monkeypatch):
+    """On Android the ffmpeg program (libffmpegbin.so) merges HD video + audio."""
+    monkeypatch.setattr(downloader.tools, "ffmpeg_available", lambda: False)
+    monkeypatch.setattr(downloader.tools, "merge_ffmpeg_path", lambda: "/app/lib/libffmpegbin.so")
+    captured = _capture_opts(monkeypatch)
+    downloader.download("https://example.com/v", "/tmp", quality="1080p")
+    assert captured["ffmpeg_location"] == "/app/lib/libffmpegbin.so"
+    assert captured["format"] == downloader.QUALITIES["1080p"]
+    assert captured["postprocessor_args"]["merger"][-3:-1] == ["aac", "-b:a"]

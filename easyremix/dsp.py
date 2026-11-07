@@ -5,12 +5,10 @@ All audio is float32 numpy arrays shaped (channels, samples).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from fractions import Fraction
 
 import numpy as np
-import pedalboard as pb
-from scipy.signal import butter, resample_poly, sosfilt
 
+from .backend import fx as _fx
 from .theory import speed_for_semitones
 
 # ---------------------------------------------------------------- equalizer
@@ -35,20 +33,6 @@ EQ_PRESETS: dict[str, list[float]] = {
     "Muffled / Party next door": [4, 5, 4, 2, -4, -10, -16, -20, -24, -24],
     "Telephone":     [-24, -24, -18, -6, 3, 6, 5, -6, -18, -24],
 }
-
-
-def _eq_board(gains: list[float]) -> pb.Pedalboard:
-    plugins = []
-    for i, (freq, gain) in enumerate(zip(EQ_BANDS, gains)):
-        if abs(gain) < 0.05:
-            continue
-        if i == 0:
-            plugins.append(pb.LowShelfFilter(cutoff_frequency_hz=freq * 1.4, gain_db=gain, q=0.707))
-        elif i == len(EQ_BANDS) - 1:
-            plugins.append(pb.HighShelfFilter(cutoff_frequency_hz=freq * 0.7, gain_db=gain, q=0.707))
-        else:
-            plugins.append(pb.PeakFilter(cutoff_frequency_hz=freq, gain_db=gain, q=1.2))
-    return pb.Pedalboard(plugins)
 
 
 # ---------------------------------------------------------------- settings
@@ -91,25 +75,24 @@ def change_speed(audio: np.ndarray, sr: int, speed: float, keep_pitch: bool,
     if abs(speed - 1.0) < 1e-4 and abs(pitch_semitones) < 1e-3:
         return audio
     if keep_pitch or abs(speed - 1.0) < 1e-4:
-        return pb.time_stretch(audio, sr, stretch_factor=speed,
-                               pitch_shift_in_semitones=pitch_semitones)
+        return _fx.time_stretch(audio, sr, speed, pitch_semitones)
     # "Vinyl" style: resample, which changes tempo and pitch together
-    ratio = Fraction(1.0 / speed).limit_denominator(1000)
-    out = resample_poly(audio, ratio.numerator, ratio.denominator, axis=1).astype(np.float32)
+    out = _fx.vinyl_speed(audio, speed)
     if abs(pitch_semitones) >= 1e-3:
-        out = pb.time_stretch(out, sr, stretch_factor=1.0, pitch_shift_in_semitones=pitch_semitones)
+        out = _fx.time_stretch(out, sr, 1.0, pitch_semitones)
     return out
 
 
 # ---------------------------------------------------------------- ambience
 def _pink(n: int, rng: np.random.Generator) -> np.ndarray:
     """Pink (1/f) noise via spectral shaping, normalised to unit RMS."""
-    white = rng.standard_normal(n)
+    size = 1 << int(np.ceil(np.log2(max(n, 2))))  # power of two: much faster FFT
+    white = rng.standard_normal(size)
     spec = np.fft.rfft(white)
     f = np.arange(len(spec), dtype=np.float64)
     f[0] = 1.0
     spec /= np.sqrt(f)
-    out = np.fft.irfft(spec, n)
+    out = np.fft.irfft(spec, size)[:n]
     return out / (np.sqrt(np.mean(out ** 2)) + 1e-12)
 
 
@@ -120,8 +103,7 @@ def _brown(n: int, rng: np.random.Generator) -> np.ndarray:
 
 
 def _filt(x: np.ndarray, sr: int, kind: str, freq) -> np.ndarray:
-    sos = butter(2, freq, btype=kind, fs=sr, output="sos")
-    return sosfilt(sos, x)
+    return _fx.filt(x, sr, kind, freq)
 
 
 def _smooth_lfo(n: int, sr: int, rng: np.random.Generator, rate_hz: float) -> np.ndarray:
@@ -263,28 +245,15 @@ def process(audio: np.ndarray, sr: int, s: RemixSettings, progress=None) -> np.n
 
     step(0.35, "Equalizer...")
     if any(abs(g) >= 0.05 for g in s.eq_gains):
-        out = _eq_board(s.eq_gains)(out, sr)
+        out = _fx.eq(out, sr, EQ_BANDS, s.eq_gains)
 
     step(0.45, "Effects...")
-    fx = []
-    if s.distortion_db > 0.1:
-        fx.append(pb.Distortion(drive_db=s.distortion_db))
-    if s.lofi_amount > 0.01:
-        a = s.lofi_amount
-        fx.append(pb.Bitcrush(bit_depth=16 - 9 * a))
-        fx.append(pb.LowpassFilter(cutoff_frequency_hz=16000 - 12500 * a))
-    if s.chorus_mix > 0.01:
-        fx.append(pb.Chorus(rate_hz=0.8, depth=0.3, mix=s.chorus_mix, centre_delay_ms=8))
-    if s.echo_mix > 0.01:
-        fx.append(pb.Delay(delay_seconds=s.echo_delay, feedback=s.echo_feedback, mix=s.echo_mix))
-    if s.reverb_mix > 0.01:
-        fx.append(pb.Reverb(room_size=s.reverb_size, damping=0.45, wet_level=s.reverb_mix * 0.6,
-                            dry_level=1.0 - s.reverb_mix * 0.4, width=1.0))
-    if fx:
+    if (s.distortion_db > 0.1 or s.lofi_amount > 0.01 or s.chorus_mix > 0.01
+            or s.echo_mix > 0.01 or s.reverb_mix > 0.01):
         # pad with silence so reverb/echo tails are not cut off
         tail = int(sr * (2.5 if (s.reverb_mix > 0.01 or s.echo_mix > 0.01) else 0))
         out = np.pad(out, ((0, 0), (0, tail)))
-        out = pb.Pedalboard(fx)(out, sr)
+        out = _fx.effects(out, sr, s)
         if tail:
             out = _trim_tail(out, audio_len=out.shape[1] - tail)
     if s.rotate_8d > 0.01:
@@ -310,7 +279,7 @@ def process(audio: np.ndarray, sr: int, s: RemixSettings, progress=None) -> np.n
         out = out * (10 ** (s.volume_db / 20))
     out = _fade(out.astype(np.float32), sr, s.fade_in, s.fade_out)
     # transparent limiter keeps everything below clipping
-    out = pb.Pedalboard([pb.Limiter(threshold_db=-1.0, release_ms=150)])(out, sr)
+    out = _fx.limiter(out, sr, threshold_db=-1.0, release_ms=150)
     step(1.0, "Done")
     return np.clip(out, -1.0, 1.0).astype(np.float32)
 

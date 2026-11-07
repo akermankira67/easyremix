@@ -14,6 +14,7 @@ import sys
 from functools import lru_cache
 
 IS_WINDOWS = sys.platform.startswith("win")
+IS_ANDROID = hasattr(sys, "getandroidapilevel") or "ANDROID_ARGUMENT" in os.environ
 # Hide the console window that would otherwise flash for every ffmpeg call.
 NO_WINDOW = 0x08000000 if IS_WINDOWS else 0
 
@@ -36,6 +37,39 @@ def ffmpeg_path() -> str:
         if found:
             return found
         raise RuntimeError("ffmpeg was not found. The installation seems to be broken.")
+
+
+def ffmpeg_available() -> bool:
+    """False on Android, where there is no ffmpeg program (PyAV is used instead)."""
+    try:
+        ffmpeg_path()
+        return True
+    except RuntimeError:
+        return False
+
+
+@lru_cache(maxsize=None)
+def android_ffmpeg_path() -> str | None:
+    """The ffmpeg program of the Android build (python-for-android ships it as a library file,
+    ``libffmpegbin.so``, because only the native-library folder may contain executables)."""
+    if not IS_ANDROID:
+        return None
+    try:
+        from jnius import autoclass
+
+        activity = autoclass("org.kivy.android.PythonActivity").mActivity
+        folder = activity.getApplicationInfo().nativeLibraryDir
+    except Exception:
+        return None
+    path = os.path.join(folder, "libffmpegbin.so")
+    return path if os.access(path, os.X_OK) else None
+
+
+def merge_ffmpeg_path() -> str | None:
+    """An ffmpeg program yt-dlp can use to merge video and audio, or None."""
+    if ffmpeg_available():
+        return ffmpeg_path()
+    return android_ffmpeg_path()
 
 
 @lru_cache(maxsize=None)
