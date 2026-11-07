@@ -8,7 +8,7 @@ package.name = easyremix
 package.domain = io.github.akermankira67
 source.dir = .
 source.include_exts = py,png,json
-source.exclude_dirs = bin,.buildozer,tests,__pycache__
+source.exclude_dirs = bin,.buildozer,tests,__pycache__,recipes
 version.regex = __version__ = ["'](.*)["']
 version.filename = %(source.dir)s/easyremix/__init__.py
 
@@ -36,6 +36,8 @@ android.debug_artifact = apk
 # a pinned python-for-android release, so builds don't change by themselves
 p4a.branch = v2026.05.09
 p4a.bootstrap = sdl2
+# our own recipe for PyAV 17.1 (see recipes/av/__init__.py)
+p4a.local_recipes = ./recipes
 
 [buildozer]
 log_level = 2

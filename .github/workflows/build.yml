@@ -169,17 +169,26 @@ jobs:
             zlib1g-dev libncurses-dev libffi-dev libssl-dev libltdl-dev gettext lld nasm ccache
           pip install buildozer==1.6.0 setuptools  # brings the Cython version it needs (<3.0)
 
-      # SDK/NDK downloads and finished recipe builds; the first build takes about an hour
-      - uses: actions/cache@v4
+      # SDK/NDK downloads and finished recipe builds; the first build takes about an hour.
+      # Saved even when the build fails, so the next attempt continues where it stopped.
+      - uses: actions/cache/restore@v4
         with:
           path: |
             ~/.buildozer
             android/.buildozer
-          key: buildozer-${{ hashFiles('android/buildozer.spec') }}-v1
+          key: buildozer-${{ hashFiles('android/buildozer.spec', 'android/recipes/**') }}-${{ github.run_id }}
           restore-keys: buildozer-
 
       - name: Build APK
         run: sh android/build.sh
+
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: |
+            ~/.buildozer
+            android/.buildozer
+          key: buildozer-${{ hashFiles('android/buildozer.spec', 'android/recipes/**') }}-${{ github.run_id }}
 
       - name: Collect APK
         run: |
