@@ -1,5 +1,5 @@
 @echo off
-REM Builds dist\EasyRemix.exe on Windows. Requires Python 3.10+ (python.org) on PATH.
+REM Builds dist\EasyRemix\ (EasyRemix.exe + _internal folder) on Windows. Requires Python 3.10+ (python.org) on PATH.
 setlocal
 set DENO_VERSION=v2.5.6
 python -m pip install --upgrade pip || goto :error
@@ -11,7 +11,8 @@ if not exist bin\deno.exe (
 )
 python -m PyInstaller EasyRemix.spec --noconfirm || goto :error
 echo.
-echo Done! Your program is dist\EasyRemix.exe
+echo Done! Your program is in the folder dist\EasyRemix\
+echo Start it with dist\EasyRemix\EasyRemix.exe (keep the _internal folder next to it).
 goto :eof
 :error
 echo Build failed.

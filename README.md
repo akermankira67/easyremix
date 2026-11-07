@@ -17,19 +17,27 @@ A friendly desktop app that does three things:
    - **One-click presets**: Slowed + Reverb, Nightcore, Lo-Fi Rainy Night, 8D Audio, Bass Boosted, ...
    - **Preview** any 25-second part before you export
 
-The whole program is **one `EasyRemix.exe`** with nothing else to install. ffmpeg, the
-JavaScript runtime YouTube needs (deno) and every library are packed inside it.
+The program is one folder with nothing else to install:
 
-## Getting the EXE
+```
+EasyRemix\
+  EasyRemix.exe      <- double-click this
+  _internal\         <- libraries, ffmpeg, deno (keep it next to the exe)
+```
 
-* **From GitHub Actions:** every push runs the *Build Windows EXE* workflow. Open the run and
-  download the `EasyRemix-windows` artifact. Push a tag like `v1.0.0` and the workflow also
-  attaches the exe to a GitHub Release.
+Because nothing has to be unpacked at launch, the window opens in about half a second.
+
+## Getting the program
+
+* **From GitHub Actions:** every push runs the *Build Windows EXE* workflow. Open the run,
+  download the `EasyRemix-windows` artifact, unzip it anywhere and start `EasyRemix.exe`. Push a
+  tag like `v1.0.0` and the workflow also attaches `EasyRemix-windows.zip` to a GitHub Release.
 * **Build it yourself on Windows:** install Python 3.12 from python.org, then double-click
-  `build.bat`. The result is `dist\EasyRemix.exe`.
+  `build.bat`. The result is the folder `dist\EasyRemix\`.
 
-The exe is about 150 MB because it contains ffmpeg and deno. The first launch takes a few
-seconds while it unpacks itself.
+The folder is a few hundred MB, mostly ffmpeg and deno. To get a desktop shortcut,
+right-click `EasyRemix.exe` → *Send to* → *Desktop (create shortcut)*. Move the whole folder,
+never only the exe.
 
 If Windows SmartScreen warns you, click *More info → Run anyway*. The exe is not code-signed.
 

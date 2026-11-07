@@ -1,4 +1,5 @@
-# PyInstaller spec: builds ONE self-contained EasyRemix(.exe)
+# PyInstaller spec: builds the folder dist/EasyRemix/ containing EasyRemix(.exe)
+# and its libraries in _internal/. Nothing is unpacked at startup, so it opens fast.
 #   pyinstaller EasyRemix.spec --noconfirm
 import os
 import sys
@@ -44,12 +45,19 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,
     name="EasyRemix",
     icon="assets/icon.ico" if os.path.isfile("assets/icon.ico") else None,
     console=False,
     upx=False,
-    runtime_tmpdir=None,
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    name="EasyRemix",
 )

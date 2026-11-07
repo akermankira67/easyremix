@@ -46,24 +46,29 @@ jobs:
           Expand-Archive deno.zip -DestinationPath bin -Force
           bin\deno.exe --version
 
-      - name: Build single EXE
+      - name: Build EasyRemix folder (EasyRemix.exe + _internal)
         run: pyinstaller EasyRemix.spec --noconfirm
 
       - name: Self-test the EXE
         shell: pwsh
         run: |
-          $p = Start-Process -FilePath dist\EasyRemix.exe -ArgumentList "--selftest" -Wait -PassThru
-          Get-Content dist\easyremix-selftest.txt
+          $p = Start-Process -FilePath dist\EasyRemix\EasyRemix.exe -ArgumentList "--selftest" -Wait -PassThru
+          Get-Content dist\EasyRemix\easyremix-selftest.txt
           if ($p.ExitCode -ne 0) { throw "Self-test failed with exit code $($p.ExitCode)" }
-          Remove-Item dist\easyremix-selftest.txt
+          Remove-Item dist\EasyRemix\easyremix-selftest.txt
 
+      - name: Zip the program folder
+        shell: pwsh
+        run: Compress-Archive -Path dist\EasyRemix -DestinationPath dist\EasyRemix-windows.zip
+
+      # The artifact is the EasyRemix folder (GitHub zips it for download).
       - uses: actions/upload-artifact@v4
         with:
           name: EasyRemix-windows
-          path: dist/EasyRemix.exe
+          path: dist/EasyRemix/
 
       - name: Publish release (on version tags)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/EasyRemix.exe
+          files: dist/EasyRemix-windows.zip

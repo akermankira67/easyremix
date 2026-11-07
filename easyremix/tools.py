@@ -1,6 +1,6 @@
 """Locating bundled helper binaries (ffmpeg, deno) and running them quietly.
 
-Everything the app needs is shipped inside the single .exe:
+Everything the app needs ships in the program folder (``_internal/``):
   * ffmpeg comes from the ``imageio-ffmpeg`` wheel (static build),
   * deno (JavaScript runtime yt-dlp uses for YouTube) is copied into
     ``bin/`` at build time.
@@ -19,7 +19,7 @@ NO_WINDOW = 0x08000000 if IS_WINDOWS else 0
 
 
 def resource_dir() -> str:
-    """Folder that holds bundled files (PyInstaller's temp dir when frozen)."""
+    """Folder that holds bundled files (``_internal`` next to the exe when frozen)."""
     if getattr(sys, "frozen", False):
         return getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
