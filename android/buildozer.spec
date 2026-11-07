@@ -14,7 +14,7 @@ version.filename = %(source.dir)s/easyremix/__init__.py
 
 # python-for-android recipes: numpy (DSP), av = PyAV + ffmpeg 8 (decoding, mp3/aac/flac/
 # ogg encoding, and the ffmpeg program used to merge HD video), plus pure-Python packages.
-requirements = python3,kivy==2.3.1,numpy,av,yt-dlp,certifi,androidstorage4kivy,filetype,pyjnius,android
+requirements = python3,kivy==2.3.1,numpy,av,charset_normalizer,yt-dlp,certifi,androidstorage4kivy,filetype,pyjnius,android
 
 icon.filename = %(source.dir)s/icon.png
 presplash.filename = %(source.dir)s/icon.png
