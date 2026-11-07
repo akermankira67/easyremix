@@ -235,4 +235,6 @@ jobs:
           name: EasyRemix ${{ steps.ver.outputs.tag }}
           target_commitish: ${{ github.sha }}
           generate_release_notes: true
+          # versions like 0.67-alpha or 1.0-beta are published as pre-releases
+          prerelease: ${{ contains(steps.ver.outputs.tag, 'alpha') || contains(steps.ver.outputs.tag, 'beta') || contains(steps.ver.outputs.tag, 'rc') }}
           files: release/*
