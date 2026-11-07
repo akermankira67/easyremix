@@ -6,4 +6,3 @@ bin/
 *.egg-info/
 .pytest_cache/
 easyremix-selftest.txt
-OneFile.spec
