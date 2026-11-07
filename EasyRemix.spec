@@ -1,6 +1,7 @@
 # PyInstaller spec: builds the folder dist/EasyRemix/ containing EasyRemix(.exe)
 # and its libraries in _internal/. Nothing is unpacked at startup, so it opens fast.
 #   pyinstaller EasyRemix.spec --noconfirm
+import glob
 import os
 import sys
 
@@ -21,6 +22,14 @@ try:
     datas += collect_data_files("_sounddevice_data")
 except Exception:
     pass
+# On Linux PortAudio is a system library (apt install libportaudio2); ship it so preview
+# playback works on machines that don't have it. easyremix/player.py points sounddevice at it.
+if sys.platform.startswith("linux"):
+    found = sorted(glob.glob("/usr/lib/*/libportaudio.so.2") + glob.glob("/usr/lib/libportaudio.so.2"))
+    if found:
+        binaries.append((found[0], "."))  # PyInstaller copies the real file under this soname
+    else:
+        print("WARNING: libportaudio.so.2 not found - preview playback needs it on the target system.")
 hiddenimports += collect_submodules("yt_dlp")
 hiddenimports += ["scipy.signal", "scipy._lib.messagestream"]
 

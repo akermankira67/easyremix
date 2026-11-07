@@ -1,4 +1,5 @@
 name: Build Windows EXE
+# Builds the Windows folder (EXE) and the Linux AppImage / tar.gz; publishes both on a release.
 
 on:
   push:
@@ -66,29 +67,107 @@ jobs:
         shell: pwsh
         run: Compress-Archive -Path dist\EasyRemix -DestinationPath dist\EasyRemix-windows.zip
 
-      - name: Work out release version
-        id: ver
-        shell: bash
-        run: |
-          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
-          elif [[ -n "${{ github.event.inputs.version }}" ]]; then
-            echo "tag=v${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
-          fi
-
       # The artifact is the EasyRemix folder (GitHub zips it for download).
       - uses: actions/upload-artifact@v4
         with:
           name: EasyRemix-windows
           path: dist/EasyRemix/
 
-      # Runs for a pushed v* tag, or a manual run with a version (creates the tag itself).
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: dist/EasyRemix-windows.zip
+
+  linux-app:
+    needs: test
+    # Oldest supported runner = oldest glibc, so the build runs on more distributions.
+    runs-on: ubuntu-22.04
+    env:
+      # CI runners can't mount FUSE; run AppImages by extracting them instead.
+      APPIMAGE_EXTRACT_AND_RUN: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install system libraries
+        run: sudo apt-get update && sudo apt-get install -y libportaudio2 libfuse2 file
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Download deno (JavaScript runtime used by yt-dlp for YouTube)
+        run: |
+          mkdir -p bin
+          curl -fsSL -o deno.zip "https://github.com/denoland/deno/releases/download/$DENO_VERSION/deno-x86_64-unknown-linux-gnu.zip"
+          unzip -o deno.zip -d bin && rm deno.zip
+          chmod +x bin/deno && bin/deno --version
+
+      - name: Build EasyRemix folder (EasyRemix + _internal)
+        run: pyinstaller EasyRemix.spec --noconfirm
+
+      - name: Self-test the program
+        run: |
+          dist/EasyRemix/EasyRemix --selftest
+          rm -f dist/EasyRemix/easyremix-selftest.txt
+
+      - name: Download appimagetool
+        run: |
+          curl -fsSL -o appimagetool "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
+          chmod +x appimagetool
+
+      - name: Package tar.gz and AppImage
+        env:
+          APPIMAGETOOL: ${{ github.workspace }}/appimagetool
+        run: sh packaging/linux/package.sh
+
+      - name: Self-test the AppImage
+        run: dist/EasyRemix-x86_64.AppImage --selftest
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EasyRemix-linux
+          path: |
+            dist/EasyRemix-x86_64.AppImage
+            dist/EasyRemix-linux-x86_64.tar.gz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-linux
+          path: |
+            dist/EasyRemix-x86_64.AppImage
+            dist/EasyRemix-linux-x86_64.tar.gz
+
+  # Runs for a pushed v* tag, or a manual run with a version (creates the tag itself).
+  release:
+    needs: [windows-exe, linux-app]
+    if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.version != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Work out release version
+        id: ver
+        shell: bash
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=v${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: release
+          merge-multiple: true
+
       - name: Publish release
-        if: steps.ver.outputs.tag != ''
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
           name: EasyRemix ${{ steps.ver.outputs.tag }}
           target_commitish: ${{ github.sha }}
           generate_release_notes: true
-          files: dist/EasyRemix-windows.zip
+          files: release/*

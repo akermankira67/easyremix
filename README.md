@@ -32,8 +32,9 @@ Because nothing has to be unpacked at launch, the window opens in about half a s
 * **From GitHub Actions:** every push runs the *Build Windows EXE* workflow. Open the run,
   download the `EasyRemix-windows` artifact, unzip it anywhere and start `EasyRemix.exe`. To publish a
   release, open *Actions → Build Windows EXE → Run workflow* and enter a version such as `0.3`.
-  The workflow builds the exe, creates the tag `v0.3` and a GitHub Release with
-  `EasyRemix-windows.zip`. Pushing a `v*` tag does the same.
+  The workflow builds the Windows exe and the Linux app, creates the tag `v0.3` and a GitHub
+  Release with `EasyRemix-windows.zip`, `EasyRemix-x86_64.AppImage` and
+  `EasyRemix-linux-x86_64.tar.gz`. Pushing a `v*` tag does the same.
 * **Build it yourself on Windows:** install Python 3.12 from python.org, then double-click
   `build.bat`. The result is the folder `dist\EasyRemix\`.
 
@@ -45,6 +46,29 @@ If Windows SmartScreen warns you, click *More info → Run anyway*. The exe is n
 
 Run `EasyRemix.exe --selftest` to check every built-in component. It writes
 `easyremix-selftest.txt` next to the exe.
+
+## Linux
+
+Every release also has two Linux downloads (64-bit x86, built on Ubuntu 22.04, so they run on
+Ubuntu 22.04+, Debian 12+, Fedora, Mint and other distributions from 2022 or later):
+
+* **`EasyRemix-x86_64.AppImage`**: one file. Make it executable and start it:
+  ```bash
+  chmod +x EasyRemix-x86_64.AppImage
+  ./EasyRemix-x86_64.AppImage
+  ```
+  If it says FUSE is missing, install it (`sudo apt install libfuse2` on Ubuntu/Debian) or start
+  it with `./EasyRemix-x86_64.AppImage --appimage-extract-and-run`.
+* **`EasyRemix-linux-x86_64.tar.gz`**: the program folder. Unpack it, run `./EasyRemix`, and
+  optionally `./install.sh` to add EasyRemix to your application menu (`./install.sh --uninstall`
+  removes it).
+
+ffmpeg, deno and PortAudio (for preview playback) are included. Run `./EasyRemix --selftest`
+to check every built-in component.
+
+To build it yourself: `sudo apt install python3-tk python3-venv libportaudio2`, then run
+`sh build_linux.sh`. The result is `dist/EasyRemix/` and `dist/EasyRemix-linux-x86_64.tar.gz`
+(plus the AppImage if `appimagetool` is on your PATH).
 
 ## The speed / key math
 

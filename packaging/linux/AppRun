@@ -1,0 +1,4 @@
+#!/bin/sh
+# AppImage entry point: start the PyInstaller program folder stored in usr/lib/easyremix.
+HERE="$(dirname "$(readlink -f "$0")")"
+exec "$HERE/usr/lib/easyremix/EasyRemix" "$@"

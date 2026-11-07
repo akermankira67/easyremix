@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=EasyRemix
+Comment=Download, extract and remix audio
+Exec=EasyRemix
+Icon=easyremix
+Terminal=false
+Categories=AudioVideo;Audio;
