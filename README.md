@@ -31,7 +31,7 @@ Because nothing has to be unpacked at launch, the window opens in about half a s
 
 * **From GitHub Actions:** every push runs the *Build Windows EXE* workflow. Open the run,
   download the `EasyRemix-windows` artifact, unzip it anywhere and start `EasyRemix.exe`. Push a
-  tag like `v1.0.0` and the workflow also attaches `EasyRemix-windows.zip` to a GitHub Release.
+  tag like `v0.3` and the workflow also attaches `EasyRemix-windows.zip` to a GitHub Release.
 * **Build it yourself on Windows:** install Python 3.12 from python.org, then double-click
   `build.bat`. The result is the folder `dist\EasyRemix\`.
 
