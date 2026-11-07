@@ -138,8 +138,11 @@ class App(ctk.CTk):
         if frac is not None:
             self.progress.set(max(0.0, min(1.0, frac)))
 
-    def run_task(self, label: str, work, on_done=None):
-        """Run ``work(progress)`` in a background thread; ``on_done(result)`` in the UI thread."""
+    def run_task(self, label: str, work, on_done=None, on_error=None):
+        """Run ``work(progress)`` in a background thread; ``on_done(result)`` in the UI thread.
+
+        ``on_error(exc)`` (optional) also runs in the UI thread after the error was shown.
+        """
         if self._busy:
             messagebox.showinfo(APP_NAME, "Please wait, another task is still running.")
             return
@@ -155,7 +158,7 @@ class App(ctk.CTk):
                 self._queue.put(("done", on_done, result))
             except Exception as exc:  # report every failure to the user
                 traceback.print_exc()
-                self._queue.put(("error", label, exc))
+                self._queue.put(("error", label, exc, on_error))
 
         threading.Thread(target=runner, daemon=True).start()
 
@@ -177,6 +180,8 @@ class App(ctk.CTk):
                     self._busy = False
                     self.set_status("Something went wrong.", 0)
                     messagebox.showerror(APP_NAME, f"{item[1].strip('. ')} failed:\n\n{item[2]}")
+                    if item[3]:
+                        item[3](item[2])
         except queue.Empty:
             pass
         self.after(80, self._poll_queue)
@@ -232,6 +237,10 @@ class App(ctk.CTk):
         ctk.CTkButton(actions, text="⬇  Download", height=44, width=200, fg_color=ACCENT,
                       font=ctk.CTkFont(size=15, weight="bold"),
                       command=self.start_download).pack(side="left")
+        self.dl_resume = ctk.CTkButton(actions, text="⟳  Resume", height=44, width=130, state="disabled",
+                                       fg_color="gray30", hover_color="#1b5e20",
+                                       command=self.start_download)
+        self.dl_resume.pack(side="left", padx=(8, 0))
         self.dl_open = ctk.CTkButton(actions, text="Open folder", height=44, width=130, state="disabled",
                                      fg_color="gray30", hover_color="gray25",
                                      command=lambda: open_in_explorer(self.last_download))
@@ -284,6 +293,7 @@ class App(ctk.CTk):
         browser = None if browser.startswith("No") else browser
         out_dir = self.dl_dir.get().strip() or default_out_dir()
         self._append_log(f"--- {url}")
+        self.dl_resume.configure(state="disabled", fg_color="gray30")
 
         def work(progress):
             from .downloader import download
@@ -300,7 +310,13 @@ class App(ctk.CTk):
                 btn.configure(state="normal")
             self.dl_to_extract.configure(state="disabled" if audio_only else "normal")
 
-        self.run_task("Starting download...", work, done)
+        def failed(exc):
+            if getattr(exc, "resumable", False):
+                self.dl_resume.configure(state="normal", fg_color="#2e7d32")
+                self._append_log("Download paused. The downloaded part is kept - press 'Resume' to continue.")
+                self.set_status("Download paused - press Resume to continue.", None)
+
+        self.run_task("Starting download...", work, done, failed)
 
     def _download_to_extract(self):
         self.ex_src.set(self.last_download)

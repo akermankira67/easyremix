@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import Callable
 
 from .tools import deno_path, ffmpeg_path
@@ -12,6 +13,30 @@ QUALITIES = {
     "720p": "bestvideo*[height<=720]+bestaudio/best[height<=720]",
     "480p": "bestvideo*[height<=480]+bestaudio/best[height<=480]",
 }
+
+
+# --- reliability settings for slow / unstable / throttled connections -------------------
+SOCKET_TIMEOUT = 60          # seconds without data before a request counts as failed
+HTTP_RETRIES = 20            # retries of a whole-file (https) request
+FRAGMENT_RETRIES = 30        # retries of a single fragment of a fragmented (m3u8/DASH) stream
+CHUNK_SIZE = 10 * 1024 * 1024  # download https streams in 10 MB requests (less throttling)
+RESUME_ATTEMPTS = 5          # automatic restarts after the download failed completely
+RESUME_WAITS = [5, 10, 20, 40, 60]  # seconds to wait before each automatic restart
+
+# Errors that will not go away by trying again
+_PERMANENT = ("unsupported url", "private video", "video unavailable", "is not available",
+              "sign in to confirm", "age-restricted", "age restricted", "could not copy",
+              "cookie", "removed by the uploader", "copyright", "members-only", "join this channel")
+
+
+def _backoff(n: int) -> float:
+    """Wait 1, 2, 4, 8, 16, 30, 30... seconds between retries."""
+    return float(min(30, 2 ** n))
+
+
+def is_retryable(message: str) -> bool:
+    low = message.lower()
+    return not any(p in low for p in _PERMANENT)
 
 
 class _QuietLogger:
@@ -42,8 +67,15 @@ def download(
     on_progress: Callable[[float, str], None] | None = None,
     on_log: Callable[[str], None] | None = None,
     cookies_browser: str | None = None,
+    resume_attempts: int = RESUME_ATTEMPTS,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> str:
-    """Download ``url`` into ``out_dir``. Returns the path of the final file."""
+    """Download ``url`` into ``out_dir``. Returns the path of the final file.
+
+    Never produces a file with holes: missing fragments are retried (with growing pauses)
+    instead of skipped. If the download still fails, it is restarted automatically and
+    continues from the already downloaded part (``.part`` files are kept).
+    """
     import yt_dlp
 
     os.makedirs(out_dir, exist_ok=True)
@@ -74,7 +106,21 @@ def download(
         "postprocessor_hooks": [post_hook],
         "logger": _QuietLogger(on_log),
         "windowsfilenames": True,
-        "overwrites": True,
+        # --- 1. never skip fragments, retry patiently instead
+        "skip_unavailable_fragments": False,
+        "retries": HTTP_RETRIES,
+        "fragment_retries": FRAGMENT_RETRIES,
+        "extractor_retries": 5,
+        "file_access_retries": 5,
+        "socket_timeout": SOCKET_TIMEOUT,
+        "retry_sleep_functions": {"http": _backoff, "fragment": _backoff, "extractor": _backoff},
+        # --- 2. prefer single-file https streams (resumable byte by byte) over fragmented
+        #        m3u8 streams, without lowering the resolution
+        "format_sort": ["res", "proto"],
+        "http_chunk_size": CHUNK_SIZE,
+        # --- 3. keep partial downloads so a restart continues where it stopped
+        "continuedl": True,
+        "keep_fragments": False,
     }
     if cookies_browser:
         # lets age-restricted / members-only videos work using the user's own login
@@ -96,15 +142,36 @@ def download(
         # Re-encode audio to AAC so the mp4 plays everywhere (Windows player etc.).
         opts["postprocessor_args"] = {"merger": ["-c:v", "copy", "-c:a", "aac", "-b:a", "192k"]}
 
-    with yt_dlp.YoutubeDL(opts) as ydl:
+    attempt = 0
+    while True:
         try:
-            info = ydl.extract_info(url, download=True)
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                path = result.get("path")
+                if not path:
+                    path = (info.get("requested_downloads", [{}])[0].get("filepath")
+                            or ydl.prepare_filename(info))
+            return path
         except yt_dlp.utils.DownloadError as exc:
-            raise RuntimeError(friendly_error(str(exc))) from None
-        path = result.get("path")
-        if not path:
-            path = info.get("requested_downloads", [{}])[0].get("filepath") or ydl.prepare_filename(info)
-    return path
+            message = str(exc)
+            if attempt >= resume_attempts or not is_retryable(message):
+                raise DownloadFailed(friendly_error(message), resumable=is_retryable(message)) from None
+            wait = RESUME_WAITS[min(attempt, len(RESUME_WAITS) - 1)]
+            attempt += 1
+            if on_log:
+                on_log(f"Connection problem. The downloaded part is kept - continuing in {wait} s "
+                       f"(automatic restart {attempt}/{resume_attempts})...")
+            if on_progress:
+                on_progress(0.0, f"Connection lost - continuing in {wait} s ({attempt}/{resume_attempts})")
+            sleep(wait)
+
+
+class DownloadFailed(RuntimeError):
+    """Download error; ``resumable`` means pressing Resume later can continue it."""
+
+    def __init__(self, message: str, resumable: bool):
+        super().__init__(message)
+        self.resumable = resumable
 
 
 def friendly_error(msg: str) -> str:
@@ -112,6 +179,10 @@ def friendly_error(msg: str) -> str:
     low = msg.lower()
     if "sign in to confirm" in low or ("age" in low and "restrict" in low):
         hint = "YouTube wants you to be signed in. Choose your browser under 'Use login from'."
+    elif any(k in low for k in ("timed out", "503", "502", "connection", "fragment", "incompleteread",
+                                 "getaddrinfo", "network")):
+        hint = ("The connection kept dropping, so the download was paused. Nothing broken was saved: "
+                "the downloaded part is kept. Press 'Resume' when the connection is better.")
     elif "403" in low:
         hint = ("YouTube refused the download (HTTP 403). This happens on VPN/cloud networks or when "
                 "YouTube changes something. Try again later, without a VPN, or with 'Use login from'.")
