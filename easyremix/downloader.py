@@ -65,6 +65,38 @@ def normalize_url(text: str) -> str | None:
     return None
 
 
+_preloaded = False
+
+
+def preload_android_curl() -> str:
+    """Android: load curl_cffi's own C++ runtime before yt-dlp imports curl_cffi.
+
+    The library is found through ``RUNPATH $ORIGIN/../curl_cffi.libs`` anyway; loading it
+    first (globally) is a safety net for phones whose loader resolves the path differently.
+    Returns a short status for the log.
+    """
+    global _preloaded
+    if _preloaded or not tools.IS_ANDROID:
+        return ""
+    _preloaded = True
+    import ctypes
+    import glob
+    import importlib.util
+
+    try:
+        spec = importlib.util.find_spec("curl_cffi")
+        if not spec or not spec.origin:
+            return "curl_cffi is not installed (TikTok may not work)"
+        libs = os.path.join(os.path.dirname(os.path.dirname(spec.origin)), "curl_cffi.libs")
+        for lib in sorted(glob.glob(os.path.join(libs, "*.so"))):
+            ctypes.CDLL(lib, mode=ctypes.RTLD_GLOBAL)
+        __import__("curl_cffi")
+
+        return "browser impersonation ready (TikTok)"
+    except Exception as exc:  # never block downloads because of this
+        return f"browser impersonation unavailable: {exc}"
+
+
 def _backoff(n: int) -> float:
     """Wait 1, 2, 4, 8, 16, 30, 30... seconds between retries."""
     return float(min(30, 2 ** n))
@@ -119,6 +151,9 @@ def download(
     ``cancel`` is a ``threading.Event``: setting it stops the download, deletes its partial
     files and raises ``DownloadCancelled``.
     """
+    status = preload_android_curl()
+    if status and on_log:
+        on_log(status)
     import yt_dlp
 
     os.makedirs(out_dir, exist_ok=True)

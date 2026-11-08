@@ -200,6 +200,22 @@ jobs:
           cp android/bin/*.apk dist/EasyRemix-android-arm64.apk
           ls -l dist
 
+      - name: Check the APK contains TikTok support (curl_cffi)
+        shell: python
+        run: |
+          import io, tarfile, zipfile
+          apk = zipfile.ZipFile("dist/EasyRemix-android-arm64.apk")
+          data = apk.read("lib/arm64-v8a/libpybundle.so")
+          try:
+              names = tarfile.open(fileobj=io.BytesIO(data)).getnames()
+          except tarfile.TarError:
+              names = zipfile.ZipFile(io.BytesIO(data)).namelist()
+          need = ["curl_cffi/_wrapper.abi3.so", "curl_cffi.libs/libc++_shared", "_cffi_backend"]
+          for n in need:
+              hits = [x for x in names if n in x]
+              print(("OK  " if hits else "MISSING  ") + n, hits[:1])
+              assert hits, n + " is missing from the APK"
+
       - uses: actions/upload-artifact@v4
         with:
           name: EasyRemix-android
