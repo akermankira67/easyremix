@@ -1,0 +1,1 @@
+int xml easyremix_share_paths 0x0

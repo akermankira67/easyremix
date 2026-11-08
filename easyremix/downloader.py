@@ -40,6 +40,24 @@ _PERMANENT = ("unsupported url", "private video", "video unavailable", "is not a
               "cookie", "removed by the uploader", "copyright", "members-only", "join this channel")
 
 
+def normalize_url(text: str) -> str | None:
+    """Turn what the user pasted into a full link, or None if it is not a link.
+
+    Accepts links without ``https://`` (``tiktok.com/@user/video/123``, ``vm.tiktok.com/x``,
+    ``youtu.be/x``) and text around the link (TikTok's share text: "Check this out! https://...").
+    """
+    import re
+
+    text = (text or "").strip()
+    m = re.search(r"https?://\S+", text)
+    if m:
+        return m.group(0).rstrip(").,!")
+    m = re.search(r"(?<![\w@])((?:[\w-]+\.)+[a-z]{2,}(?:/\S*)?)", text, re.IGNORECASE)
+    if m and " " not in m.group(1):
+        return "https://" + m.group(1).rstrip(").,!")
+    return None
+
+
 def _backoff(n: int) -> float:
     """Wait 1, 2, 4, 8, 16, 30, 30... seconds between retries."""
     return float(min(30, 2 ** n))

@@ -15,6 +15,8 @@ for pkg in ("customtkinter", "pedalboard", "yt_dlp_ejs"):
     binaries += b
     hiddenimports += h
 
+# app logo / window icon
+datas += [(os.path.join("assets", f), "assets") for f in ("logo-128.png", "icon.ico", "icon.png")]
 # static ffmpeg build shipped inside the imageio-ffmpeg wheel
 datas += collect_data_files("imageio_ffmpeg", subdir="binaries")
 # PortAudio dll for preview playback (the package only exists on Windows/macOS wheels)
@@ -31,7 +33,7 @@ if sys.platform.startswith("linux"):
     else:
         print("WARNING: libportaudio.so.2 not found - preview playback needs it on the target system.")
 hiddenimports += collect_submodules("yt_dlp")
-hiddenimports += ["scipy.signal", "scipy._lib.messagestream"]
+hiddenimports += ["scipy.signal", "scipy._lib.messagestream", "PIL.ImageTk"]
 
 # deno = JavaScript runtime yt-dlp needs for YouTube (put into ./bin before building)
 deno = os.path.join("bin", "deno.exe" if sys.platform.startswith("win") else "deno")

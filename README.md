@@ -2,14 +2,21 @@
 
 ![EasyRemix remix tab](assets/screenshot.png)
 
-A friendly desktop app that does three things:
+A friendly app for Windows, Linux and Android with two tabs:
 
-1. **Download** a YouTube video (or audio only) from a link
-2. **Extract** the audio from any video into a standalone file (mp3, wav, flac, m4a, ogg)
-3. **Remix** a track:
+1. **Get video or audio**: paste a link (YouTube, TikTok, Instagram, VK, X and 1000+ other
+   sites) or pick a file, then choose **Full video**, **Audio only** (mp3, wav, flac, m4a, ogg)
+   or **Remix it** (the sound goes straight into the Remix tab).
+   **Send to...** shares the video itself with friends (Telegram, WhatsApp, VK, Facebook ...)
+   without keeping a copy in your files:
+   - on Android it opens the phone's share sheet, so every installed app is offered;
+   - on the desktop the video is downloaded to a temporary folder and copied to the clipboard,
+     the messenger opens, and Ctrl+V in a chat sends it. Temporary copies are deleted
+     automatically after a few hours.
+2. **Remix** a track:
    - **Key & BPM detection**, including the Camelot code DJs use (e.g. `8A` = A minor)
    - **Speed up / slow down**, either classic (pitch changes too, like a record player: *slowed*, *nightcore*) or time-stretch (tempo only)
-   - A **best-speeds table** listing every speed that moves the song a whole number of semitones, so it stays in tune. For each one it shows the new key, new BPM, a star rating and a short explanation
+   - **Best speeds**: one-tap buttons for every speed that moves the song a whole number of semitones, so it stays in tune, with the new key, new BPM, a star rating and a short explanation
    - **10-band equalizer** with 16 presets (Bass Boost, Vocal, Lo-Fi, Party next door, Telephone, ...)
    - **Effects**: reverb, echo, chorus, lo-fi/bitcrush, distortion, 8D rotation
    - **Ambience layers**: rain, vinyl crackle, tape hiss, ocean waves, wind, fireplace. These sounds are generated in code, so they are royalty-free
@@ -73,13 +80,15 @@ To build it yourself: `sudo apt install python3-tk python3-venv libportaudio2`, 
 ## Android
 
 `EasyRemix-android-arm64.apk` is the phone version (Android 7 or newer, 64-bit ARM, which is
-practically every phone from the last years). It has the same three tabs (Download, Extract,
+practically every phone from the last years). It has the same two tabs (Get video or audio,
 Remix) with a touch interface, and uses the same engine as the desktop app.
 
 To install it, open the APK on the phone and allow installing apps from that source when
 Android asks. The APK is not from the Play Store, so Android shows a warning; that is expected
 for apps you install yourself.
 
+* **Send video** downloads into the app's private cache and opens Android's share sheet;
+  nothing appears in the gallery or file manager.
 * Downloads, extracted audio and remixes are saved to the phone's shared folders,
   `Music/EasyRemix` (audio) and `Movies/EasyRemix` (video), so music and gallery apps find them.
 * Remix effects are computed with numpy on the phone (the desktop uses pedalboard), so they

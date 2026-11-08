@@ -8,7 +8,7 @@ package.name = easyremix
 package.domain = io.github.akermankira67
 source.dir = .
 source.include_exts = py,png,json
-source.exclude_dirs = bin,.buildozer,tests,__pycache__,recipes
+source.exclude_dirs = bin,.buildozer,tests,__pycache__,recipes,share_aar,aar
 version.regex = __version__ = ["'](.*)["']
 version.filename = %(source.dir)s/easyremix/__init__.py
 
@@ -31,6 +31,10 @@ android.archs = arm64-v8a
 android.accept_sdk_license = True
 android.allow_backup = True
 android.release_artifact = apk
+# FileProvider (androidx) so videos can be shared from the private cache - see share_aar/
+android.enable_androidx = True
+android.gradle_dependencies = androidx.core:core:1.13.1
+android.add_aars = aar/easyremix-share.aar
 android.debug_artifact = apk
 
 # a pinned python-for-android release, so builds don't change by themselves

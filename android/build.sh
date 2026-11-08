@@ -7,6 +7,7 @@ cd "$(dirname "$0")"
 rm -rf easyremix
 cp -r ../easyremix ./easyremix
 cp ../assets/icon.png ./icon.png
+python3 share_aar/build_aar.py   # FileProvider for sharing videos (merged into the manifest)
 # p4a recreates this helper virtualenv on every build; a copy restored from the CI cache
 # would mix old and new pip files, so start it fresh.
 rm -rf .buildozer/android/platform/build-*/build/venv

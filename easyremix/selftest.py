@@ -45,6 +45,14 @@ def run() -> int:
     check("time-stretch", lambda: dsp.process(audio, sr, dsp.RemixSettings(speed=1.2, keep_pitch=True)).shape)
     check("yt-dlp", lambda: __import__("yt_dlp").version.__version__)
     check("customtkinter", lambda: __import__("customtkinter").__version__)
+
+    def logo():
+        from PIL import Image
+
+        path = os.path.join(tools.resource_dir(), "assets", "logo-128.png")
+        return f"{Image.open(path).size} {os.path.basename(path)}"
+
+    check("app logo", logo)
     ok_before = ok
     check("playback library (preview only)", lambda: __import__("sounddevice").__version__)
     ok = ok_before  # preview playback is optional; exporting still works without it

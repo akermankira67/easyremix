@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Merged into the app's manifest by Gradle (the app is built with this as a local AAR).
+     Declares a FileProvider so a video in the app's private cache can be handed to
+     Telegram, VK, WhatsApp ... through the share sheet without saving it to the user's files. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="io.github.akermankira67.easyremix.share">
+    <application>
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.share"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/easyremix_share_paths" />
+        </provider>
+    </application>
+</manifest>

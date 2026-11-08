@@ -1,4 +1,8 @@
-"""EasyRemix graphical interface (customtkinter)."""
+"""EasyRemix graphical interface (customtkinter).
+
+Layout principles: one clear task per tab, the main action is always the big violet
+button, things you rarely need are folded away, and every number explains itself.
+"""
 from __future__ import annotations
 
 import os
@@ -13,14 +17,35 @@ import customtkinter as ctk
 
 from . import APP_NAME, __version__
 from .audio_io import EXPORT_FORMATS, SAMPLE_RATE, extract_audio, load_audio, save_audio
-from .theory import Key, describe_speed, semitones_for_speed, speed_suggestions
+from .theory import Key, describe_speed, speed_suggestions
 
+# ---------------------------------------------------------------- look & feel
 ACCENT = "#7c4dff"
-MUTED = ("gray40", "gray65")
+ACCENT_HOVER = "#6a3bef"
+PINK = "#ec4899"
+GOOD = ("#2e7d32", "#81c784")
+BAD = ("#c62828", "#ff8a80")
+MUTED = ("gray40", "gray62")
+SECONDARY = dict(fg_color=("gray82", "gray25"), hover_color=("gray74", "gray31"),
+                 text_color=("gray10", "gray92"))
+PLAY = dict(fg_color="#2e9d5b", hover_color="#23804a")
+PILL = ("gray86", "gray22")
+CARD = ("gray95", "gray14")
+
 VIDEO_TYPES = [("Video files", "*.mp4 *.mkv *.webm *.mov *.avi *.flv *.m4v *.wmv"), ("All files", "*.*")]
 AUDIO_TYPES = [("Audio & video", "*.mp3 *.wav *.flac *.m4a *.ogg *.opus *.aac *.wma *.mp4 *.mkv *.webm *.mov"),
                ("All files", "*.*")]
 PREVIEW_SECONDS = 25
+FORMAT_HINTS = {
+    "mp3": "MP3 - small and plays everywhere (recommended)",
+    "wav": "WAV - lossless, very large files",
+    "flac": "FLAC - lossless and compressed, for archiving",
+    "m4a": "M4A - small, great on iPhone / Apple Music",
+    "ogg": "OGG - small, open format",
+}
+
+TAB_GET = "  ⬇  Get video or audio  "
+TAB_REMIX = "  ✦  Remix  "
 
 
 def default_out_dir() -> str:
@@ -60,27 +85,103 @@ def parse_time(text: str) -> float:
     return float(text)
 
 
-class Section(ctk.CTkFrame):
-    """A titled card used to group controls."""
+def short_path(path: str, keep: int = 2) -> str:
+    """'~/Music/EasyRemix' instead of a long absolute path."""
+    home = os.path.expanduser("~")
+    if path.startswith(home):
+        path = "~" + path[len(home):]
+    parts = path.replace("\\", "/").split("/")
+    return path if len(parts) <= keep + 2 else ".../" + "/".join(parts[-keep:])
 
-    def __init__(self, master, title: str, subtitle: str = ""):
-        super().__init__(master, corner_radius=12)
-        head = ctk.CTkFrame(self, fg_color="transparent")
-        head.pack(fill="x", padx=14, pady=(10, 4))
-        ctk.CTkLabel(head, text=title, font=ctk.CTkFont(size=16, weight="bold")).pack(side="left")
+
+def font(size=13, weight="normal"):
+    return ctk.CTkFont(size=size, weight=weight)
+
+
+def load_logo(size: int):
+    """The app logo as a CTkImage (None if Pillow or the file is missing)."""
+    try:
+        from PIL import Image
+
+        from .tools import resource_dir
+
+        path = os.path.join(resource_dir(), "assets", "logo-128.png")
+        img = Image.open(path)
+        return ctk.CTkImage(light_image=img, dark_image=img, size=(size, size))
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------- building blocks
+class Card(ctk.CTkFrame):
+    """A rounded panel with a title. ``collapsible`` cards fold away rarely used settings;
+    their header then shows a one-line summary of what is set inside."""
+
+    def __init__(self, master, title: str, subtitle: str = "", collapsible: bool = False,
+                 start_open: bool = True):
+        super().__init__(master, corner_radius=14, fg_color=CARD)
+        self.collapsible = collapsible
+        self.is_open = start_open or not collapsible
+        head = ctk.CTkFrame(self, fg_color="transparent", cursor="hand2" if collapsible else "")
+        head.pack(fill="x", padx=16, pady=(12, 6 if self.is_open else 12))
+        self._head = head
+        self.chevron = ctk.CTkLabel(head, text=("▾" if self.is_open else "▸") if collapsible else "",
+                                    width=14 if collapsible else 0, font=font(14, "bold"))
+        self.chevron.pack(side="left")
+        ctk.CTkLabel(head, text=title, font=font(16, "bold")).pack(side="left", padx=(4 if collapsible else 0, 0))
         if subtitle:
-            ctk.CTkLabel(head, text=subtitle, text_color=MUTED).pack(side="left", padx=10)
+            ctk.CTkLabel(head, text=subtitle, text_color=MUTED, font=font(13)).pack(side="left", padx=10)
+        self.summary = ctk.CTkLabel(head, text="", text_color=MUTED, font=font(13))
+        self.summary.pack(side="right")
         self.body = ctk.CTkFrame(self, fg_color="transparent")
-        self.body.pack(fill="both", expand=True, padx=14, pady=(0, 12))
+        if self.is_open:
+            self.body.pack(fill="both", expand=True, padx=16, pady=(0, 14))
+        if collapsible:
+            for w in (head, self.chevron, *head.winfo_children()):
+                w.bind("<Button-1>", lambda e: self.toggle())
+
+    def toggle(self, force: bool | None = None):
+        if not self.collapsible:
+            return
+        self.is_open = (not self.is_open) if force is None else force
+        self.chevron.configure(text="▾" if self.is_open else "▸")
+        if self.is_open:
+            self._head.pack_configure(pady=(12, 6))
+            self.body.pack(fill="both", expand=True, padx=16, pady=(0, 14))
+        else:
+            self._head.pack_configure(pady=12)
+            self.body.pack_forget()
+
+    def set_summary(self, text: str):
+        self.summary.configure(text=text)
 
 
+def pill(master, text="", **kw):
+    """Small rounded info label (key, BPM, length...)."""
+    return ctk.CTkLabel(master, text=text, corner_radius=10, fg_color=PILL, height=30,
+                        font=font(14, "bold"), padx=12, **kw)
+
+
+def secondary_button(master, text, command, **kw):
+    kw.setdefault("height", 38)
+    return ctk.CTkButton(master, text=text, command=command, **SECONDARY, **kw)
+
+
+def primary_button(master, text, command, **kw):
+    kw.setdefault("height", 46)
+    kw.setdefault("font", font(15, "bold"))
+    return ctk.CTkButton(master, text=text, command=command, fg_color=ACCENT, hover_color=ACCENT_HOVER, **kw)
+
+
+# ---------------------------------------------------------------- the window
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         ctk.set_appearance_mode("dark")
         self.title(f"{APP_NAME} {__version__}")
-        self.geometry("1180x820")
-        self.minsize(980, 680)
+        self.geometry("1180x840")
+        self.minsize(1000, 700)
+        self._set_window_icon()
 
         self._queue: queue.Queue = queue.Queue()
         self._busy = False
@@ -92,14 +193,19 @@ class App(ctk.CTk):
         self.last_extract = ""
         self._loading_preset = False
         self._player = None
+        self.current_preset = ""
 
         self._build_header()
-        self.tabs = ctk.CTkTabview(self, corner_radius=12, segmented_button_selected_color=ACCENT)
-        self.tabs.pack(fill="both", expand=True, padx=14, pady=(0, 6))
-        self._build_download(self.tabs.add("  1. Download  "))
-        self._build_extract(self.tabs.add("  2. Extract audio  "))
-        self._build_remix(self.tabs.add("  3. Remix  "))
         self._build_statusbar()
+        self.tabs = ctk.CTkTabview(self, corner_radius=16, segmented_button_selected_color=ACCENT,
+                                   segmented_button_selected_hover_color=ACCENT_HOVER)
+        self.tabs.pack(fill="both", expand=True, padx=16, pady=(4, 8))
+        try:  # bigger, friendlier tab buttons
+            self.tabs._segmented_button.configure(font=font(14, "bold"), height=38)
+        except Exception:
+            pass
+        self._build_get(self.tabs.add(TAB_GET))
+        self._build_remix(self.tabs.add(TAB_REMIX))
         self.after(80, self._poll_queue)
 
     # ------------------------------------------------------------ plumbing
@@ -111,27 +217,46 @@ class App(ctk.CTk):
             self._player = Player()
         return self._player
 
+    def _set_window_icon(self):
+        try:
+            from .tools import resource_dir
+
+            assets = os.path.join(resource_dir(), "assets")
+            if sys.platform.startswith("win") and os.path.isfile(os.path.join(assets, "icon.ico")):
+                self.after(250, lambda: self.iconbitmap(os.path.join(assets, "icon.ico")))
+            else:
+                from PIL import Image, ImageTk
+
+                self._icon_photo = ImageTk.PhotoImage(Image.open(os.path.join(assets, "logo-128.png")))
+                self.iconphoto(True, self._icon_photo)
+        except Exception:
+            pass
+
     def _build_header(self):
         bar = ctk.CTkFrame(self, fg_color="transparent")
-        bar.pack(fill="x", padx=18, pady=(12, 0))
-        ctk.CTkLabel(bar, text="EasyRemix", font=ctk.CTkFont(size=26, weight="bold"),
-                     text_color=ACCENT).pack(side="left")
-        ctk.CTkLabel(bar, text="download  •  extract  •  remix", text_color=MUTED,
-                     font=ctk.CTkFont(size=14)).pack(side="left", padx=14, pady=(6, 0))
+        bar.pack(fill="x", padx=20, pady=(14, 2))
+        logo = load_logo(40)
+        if logo:
+            ctk.CTkLabel(bar, text="", image=logo).pack(side="left", padx=(0, 10))
+        names = ctk.CTkFrame(bar, fg_color="transparent")
+        names.pack(side="left")
+        ctk.CTkLabel(names, text=APP_NAME, font=font(24, "bold")).pack(anchor="w")
+        ctk.CTkLabel(names, text="Download a video, pull out the audio, make it your own remix.",
+                     text_color=MUTED, font=font(13)).pack(anchor="w", pady=(0, 2))
         self.theme_switch = ctk.CTkSegmentedButton(bar, values=["Dark", "Light"],
                                                    command=lambda v: ctk.set_appearance_mode(v.lower()),
-                                                   selected_color=ACCENT)
+                                                   selected_color=ACCENT, selected_hover_color=ACCENT_HOVER)
         self.theme_switch.set("Dark")
         self.theme_switch.pack(side="right")
 
     def _build_statusbar(self):
-        bar = ctk.CTkFrame(self, height=36, corner_radius=0)
+        bar = ctk.CTkFrame(self, height=38, corner_radius=0)
         bar.pack(fill="x", side="bottom")
         self.progress = ctk.CTkProgressBar(bar, width=260, progress_color=ACCENT)
         self.progress.set(0)
-        self.progress.pack(side="right", padx=14, pady=8)
-        self.status = ctk.CTkLabel(bar, text="Ready.", anchor="w")
-        self.status.pack(side="left", fill="x", expand=True, padx=14)
+        self.progress.pack(side="right", padx=16, pady=10)
+        self.status = ctk.CTkLabel(bar, text="Ready.", anchor="w", font=font(13))
+        self.status.pack(side="left", fill="x", expand=True, padx=16)
 
     def set_status(self, text: str, frac: float | None = None):
         self.status.configure(text=text)
@@ -186,82 +311,195 @@ class App(ctk.CTk):
             pass
         self.after(80, self._poll_queue)
 
-    def _file_row(self, parent, label, var, browse, row, button="Browse..."):
-        ctk.CTkLabel(parent, text=label, anchor="w", width=120).grid(row=row, column=0, sticky="w", pady=6)
-        ctk.CTkEntry(parent, textvariable=var, height=36).grid(row=row, column=1, sticky="ew", padx=8, pady=6)
-        ctk.CTkButton(parent, text=button, width=110, height=36, command=browse,
-                      fg_color="gray30", hover_color="gray25").grid(row=row, column=2, pady=6)
-
-    # ------------------------------------------------------------ tab 1: download
-    def _build_download(self, tab):
-        card = Section(tab, "Download a video", "Paste a YouTube link (most other video sites work too)")
-        card.pack(fill="both", expand=True, padx=6, pady=6)
-        b = card.body
-        b.grid_columnconfigure(1, weight=1)
-
-        self.url_var = ctk.StringVar()
-        ctk.CTkLabel(b, text="Video link", anchor="w", width=120).grid(row=0, column=0, sticky="w", pady=6)
-        entry = ctk.CTkEntry(b, textvariable=self.url_var, height=40,
-                             placeholder_text="https://www.youtube.com/watch?v=...")
-        entry.grid(row=0, column=1, sticky="ew", padx=8, pady=6)
-        entry.bind("<Return>", lambda e: self.start_download())
-        ctk.CTkButton(b, text="Paste", width=110, height=40, fg_color="gray30", hover_color="gray25",
-                      command=self._paste_url).grid(row=0, column=2, pady=6)
-
-        ctk.CTkLabel(b, text="Save as", anchor="w", width=120).grid(row=1, column=0, sticky="w", pady=6)
-        opts = ctk.CTkFrame(b, fg_color="transparent")
-        opts.grid(row=1, column=1, columnspan=2, sticky="w", padx=8)
-        self.dl_mode = ctk.StringVar(value="video")
-        ctk.CTkRadioButton(opts, text="Video (MP4)", variable=self.dl_mode, value="video",
-                           command=self._dl_mode_changed, fg_color=ACCENT).pack(side="left", padx=(0, 18))
-        ctk.CTkRadioButton(opts, text="Audio only (MP3 320 kbps)", variable=self.dl_mode, value="audio",
-                           command=self._dl_mode_changed, fg_color=ACCENT).pack(side="left", padx=(0, 18))
-        ctk.CTkLabel(opts, text="Quality:").pack(side="left", padx=(12, 6))
+    # ------------------------------------------------------------ tab 1: get (download / extract)
+    def _build_get(self, tab):
+        """One place to get media: from a link or a file -> full video, audio only, or remix."""
         from .downloader import QUALITIES
 
-        self.quality_box = ctk.CTkComboBox(opts, values=list(QUALITIES), width=160, state="readonly")
+        tab.grid_columnconfigure(0, weight=1)
+        self.get_source = "link"
+        self.get_choice = "video"
+        self.ex_src = ctk.StringVar()      # chosen local file
+        self.url_var = ctk.StringVar()
+        self.dl_mode = ctk.StringVar(value="video")
+
+        # --- step 1: where from
+        src = Card(tab, "1   Where from?")
+        src.grid(row=0, column=0, sticky="ew", padx=6, pady=(6, 8))
+        b = src.body
+        b.grid_columnconfigure(0, weight=1)
+        self.src_switch = ctk.CTkSegmentedButton(
+            b, values=["Video link", "File on this computer"], height=38, font=font(13, "bold"),
+            selected_color=ACCENT, selected_hover_color=ACCENT_HOVER, command=self._on_source)
+        self.src_switch.set("Video link")
+        self.src_switch.grid(row=0, column=0, sticky="w", pady=(2, 12))
+
+        self.link_row = ctk.CTkFrame(b, fg_color="transparent")
+        self.link_row.grid(row=1, column=0, sticky="ew")
+        self.link_row.grid_columnconfigure(0, weight=1)
+        entry = ctk.CTkEntry(self.link_row, textvariable=self.url_var, height=46, font=font(15),
+                             placeholder_text="Paste a link from YouTube, TikTok, Instagram, VK, X ...")
+        entry.grid(row=0, column=0, sticky="ew")
+        entry.bind("<Return>", lambda e: self.start_get())
+        secondary_button(self.link_row, "Paste", self._paste_url, width=96, height=46).grid(row=0, column=1,
+                                                                                         padx=(10, 0))
+        self.share_link_btn = secondary_button(self.link_row, "↗  Send to...",
+                                               lambda: self._share_menu(self.share_link_btn), width=130, height=46)
+        self.share_link_btn.grid(row=0, column=2, padx=(10, 0))
+        ctk.CTkLabel(self.link_row, text="YouTube, TikTok, Instagram, VK, X and 1000+ other sites.   "
+                                         "'Send to' shares the video itself - it is not kept in your files.",
+                     text_color=MUTED).grid(row=1, column=0, sticky="w", pady=(6, 0))
+
+        self.file_row = ctk.CTkFrame(b, corner_radius=12, fg_color=PILL)
+        self.file_row.grid_columnconfigure(1, weight=1)
+        secondary_button(self.file_row, "Choose a file...", self._pick_get_file, width=190, height=44,
+                         font=font(14, "bold")).grid(row=0, column=0, rowspan=2, padx=12, pady=12)
+        self.ex_name = ctk.CTkLabel(self.file_row, text="No file chosen yet", font=font(15, "bold"), anchor="w")
+        self.ex_name.grid(row=0, column=1, sticky="sw", padx=6, pady=(12, 0))
+        self.ex_folder = ctk.CTkLabel(self.file_row, text="Any video or audio file: MP4, MKV, WEBM, MOV, MP3, WAV ...",
+                                      text_color=MUTED, anchor="w")
+        self.ex_folder.grid(row=1, column=1, sticky="nw", padx=6, pady=(0, 12))
+
+        # --- step 2: what do you want
+        what = Card(tab, "2   What do you want?")
+        what.grid(row=1, column=0, sticky="ew", padx=6, pady=(0, 8))
+        w = what.body
+        tiles = ctk.CTkFrame(w, fg_color="transparent")
+        tiles.pack(fill="x")
+        self.choice_tiles: dict[str, ctk.CTkButton] = {}
+        for i, (key, title, sub) in enumerate([
+            ("video", "▶   Full video", "MP4 with picture and sound"),
+            ("audio", "♪   Audio only", "just the sound, as MP3, WAV, FLAC ..."),
+            ("remix", "✦   Remix it", "take the sound straight into the Remix tab"),
+        ]):
+            tiles.grid_columnconfigure(i, weight=1, uniform="tiles")
+            t = ctk.CTkButton(tiles, text=f"{title}\n{sub}", height=64, corner_radius=14, font=font(14, "bold"),
+                              command=lambda k=key: self._on_choice(k), **SECONDARY)
+            t.grid(row=0, column=i, sticky="ew", padx=4)
+            self.choice_tiles[key] = t
+
+        self.choice_opts = ctk.CTkFrame(w, fg_color="transparent")
+        self.choice_opts.pack(fill="x", pady=(12, 0))
+        self.quality_label = ctk.CTkLabel(self.choice_opts, text="Quality", font=font(14))
+        self.quality_box = ctk.CTkComboBox(self.choice_opts, values=list(QUALITIES), width=170, height=36,
+                                           state="readonly")
         self.quality_box.set("Best available")
-        self.quality_box.pack(side="left")
-        ctk.CTkLabel(opts, text="Use login from:").pack(side="left", padx=(18, 6))
-        self.cookies_box = ctk.CTkComboBox(opts, values=["No (anonymous)", "Firefox", "Edge", "Chrome", "Brave",
-                                                         "Opera"], width=150, state="readonly")
-        self.cookies_box.set("No (anonymous)")
-        self.cookies_box.pack(side="left")
+        self.fmt_label = ctk.CTkLabel(self.choice_opts, text="Format", font=font(14))
+        self.ex_fmt = ctk.CTkSegmentedButton(self.choice_opts, values=list(EXPORT_FORMATS), height=36,
+                                             font=font(13, "bold"), command=lambda v: self._on_choice(self.get_choice),
+                                             selected_color=ACCENT, selected_hover_color=ACCENT_HOVER)
+        self.ex_fmt.set("mp3")
+        self.choice_hint = ctk.CTkLabel(self.choice_opts, text="", text_color=MUTED)
 
+        actions = ctk.CTkFrame(w, fg_color="transparent")
+        actions.pack(fill="x", pady=(16, 0))
+        self.get_btn = primary_button(actions, "⬇   Download video", self.start_get, width=240)
+        self.get_btn.pack(side="left")
+        self.dl_resume = ctk.CTkButton(actions, text="⟳  Resume", height=46, width=140, font=font(14, "bold"),
+                                       command=self.start_get, **PLAY)
+        self.dl_where = ctk.CTkLabel(actions, text="", text_color=MUTED, font=font(13))
+        self.dl_where.pack(side="left", padx=16)
+
+        # result: appears when something was saved
+        self.dl_result = ctk.CTkFrame(w, corner_radius=12, fg_color=PILL)
+        self.dl_result_label = ctk.CTkLabel(self.dl_result, text="", font=font(14, "bold"), text_color=GOOD,
+                                            anchor="w")
+        self.dl_result_label.pack(side="left", padx=14, pady=10, fill="x", expand=True)
+        self.dl_to_remix = primary_button(self.dl_result, "✦  Remix it", lambda: self._send_to_remix(self.last_download),
+                                          width=124, height=36, font=font(13, "bold"))
+        self.dl_to_remix.pack(side="right", padx=(6, 10), pady=8)
+        self.dl_share = secondary_button(self.dl_result, "↗  Send to...",
+                                         lambda: self._share_menu(self.dl_share, self.last_extract), width=120,
+                                         height=36)
+        self.dl_share.pack(side="right", padx=6, pady=8)
+        self.dl_open = secondary_button(self.dl_result, "Open folder", lambda: open_in_explorer(self.last_download),
+                                        width=116, height=36)
+        self.dl_open.pack(side="right", padx=6, pady=8)
+
+        # --- folded extras
+        self.dl_options = Card(tab, "Options", collapsible=True, start_open=False)
+        self.dl_options.grid(row=2, column=0, sticky="ew", padx=6, pady=(0, 8))
+        o = self.dl_options.body
+        o.grid_columnconfigure(1, weight=1)
         self.dl_dir = ctk.StringVar(value=default_out_dir())
-        self._file_row(b, "Save to folder", self.dl_dir,
-                       lambda: self._pick_dir(self.dl_dir), row=2)
+        ctk.CTkLabel(o, text="Save downloads to", width=140, anchor="w").grid(row=0, column=0, sticky="w", pady=6)
+        ctk.CTkEntry(o, textvariable=self.dl_dir, height=36).grid(row=0, column=1, sticky="ew", padx=8, pady=6)
+        secondary_button(o, "Change...", lambda: self._pick_dir(self.dl_dir), width=110, height=36).grid(
+            row=0, column=2, pady=6)
+        ctk.CTkLabel(o, text="Use login from", width=140, anchor="w").grid(row=1, column=0, sticky="w", pady=6)
+        self.cookies_box = ctk.CTkComboBox(o, values=["No (anonymous)", "Firefox", "Edge", "Chrome", "Brave",
+                                                      "Opera"], width=170, height=36, state="readonly")
+        self.cookies_box.set("No (anonymous)")
+        self.cookies_box.grid(row=1, column=1, sticky="w", padx=8, pady=6)
+        ctk.CTkLabel(o, text="Only needed for age-restricted or members-only videos. Uses your browser's login.",
+                     text_color=MUTED).grid(row=2, column=1, columnspan=2, sticky="w", padx=8)
+        ctk.CTkLabel(o, text="Audio taken from a file is saved next to that file.",
+                     text_color=MUTED).grid(row=3, column=1, columnspan=2, sticky="w", padx=8, pady=(4, 0))
+        self.dl_dir.trace_add("write", lambda *_: self._refresh_download_summary())
 
-        actions = ctk.CTkFrame(b, fg_color="transparent")
-        actions.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(12, 6))
-        ctk.CTkButton(actions, text="⬇  Download", height=44, width=200, fg_color=ACCENT,
-                      font=ctk.CTkFont(size=15, weight="bold"),
-                      command=self.start_download).pack(side="left")
-        self.dl_resume = ctk.CTkButton(actions, text="⟳  Resume", height=44, width=130, state="disabled",
-                                       fg_color="gray30", hover_color="#1b5e20",
-                                       command=self.start_download)
-        self.dl_resume.pack(side="left", padx=(8, 0))
-        self.dl_open = ctk.CTkButton(actions, text="Open folder", height=44, width=130, state="disabled",
-                                     fg_color="gray30", hover_color="gray25",
-                                     command=lambda: open_in_explorer(self.last_download))
-        self.dl_open.pack(side="left", padx=8)
-        self.dl_to_extract = ctk.CTkButton(actions, text="→ Extract audio", height=44, width=150,
-                                           state="disabled", fg_color="gray30", hover_color="gray25",
-                                           command=self._download_to_extract)
-        self.dl_to_extract.pack(side="left", padx=8)
-        self.dl_to_remix = ctk.CTkButton(actions, text="→ Remix it", height=44, width=130,
-                                         state="disabled", fg_color="gray30", hover_color="gray25",
-                                         command=lambda: self._send_to_remix(self.last_download))
-        self.dl_to_remix.pack(side="left", padx=8)
-
-        ctk.CTkLabel(b, text="Log", anchor="w", text_color=MUTED).grid(row=4, column=0, sticky="nw", pady=(10, 0))
-        self.log = ctk.CTkTextbox(b, height=240, font=ctk.CTkFont(family="Consolas", size=12))
-        self.log.grid(row=4, column=1, columnspan=2, sticky="nsew", padx=8, pady=(10, 0))
-        b.grid_rowconfigure(4, weight=1)
+        self.dl_log_card = Card(tab, "Details", "what the downloader is doing", collapsible=True, start_open=False)
+        self.dl_log_card.grid(row=3, column=0, sticky="nsew", padx=6, pady=(0, 6))
+        self.log = ctk.CTkTextbox(self.dl_log_card.body, height=170, font=ctk.CTkFont(family="Consolas", size=12))
+        self.log.pack(fill="both", expand=True)
         self.log.configure(state="disabled")
 
-    def _dl_mode_changed(self):
-        self.quality_box.configure(state="disabled" if self.dl_mode.get() == "audio" else "readonly")
+        self._on_choice("video")
+        self._refresh_download_summary()
+
+    def _refresh_download_summary(self):
+        where = short_path(self.dl_dir.get() or default_out_dir())
+        self.dl_options.set_summary(f"Saving to {where}")
+        if self.get_source == "link" and self.get_choice != "remix":
+            self.dl_where.configure(text=f"Saves to {where}")
+        elif self.get_source == "file" and self.get_choice == "audio":
+            self.dl_where.configure(text="Saves next to the file")
+        else:
+            self.dl_where.configure(text="")
+
+    def _on_source(self, value=None):
+        self.get_source = "file" if "file" in (value or self.src_switch.get()) else "link"
+        if self.get_source == "file":
+            self.link_row.grid_forget()
+            self.file_row.grid(row=1, column=0, sticky="ew")
+            if self.get_choice == "video":
+                self.get_choice = "audio"
+        else:
+            self.file_row.grid_forget()
+            self.link_row.grid(row=1, column=0, sticky="ew")
+        self._on_choice(self.get_choice)
+
+    def _on_choice(self, key):
+        if key == "video" and self.get_source == "file":
+            messagebox.showinfo(APP_NAME, "You already have this video as a file.\n\n"
+                                          "Choose 'Audio only' to take its sound out, or 'Remix it'.")
+            key = self.get_choice if self.get_choice != "video" else "audio"
+        self.get_choice = key
+        self.dl_mode.set("video" if key == "video" else "audio")
+        for k, tile in self.choice_tiles.items():
+            if k == key:
+                tile.configure(fg_color=ACCENT, hover_color=ACCENT_HOVER, text_color="white")
+            elif k == "video" and self.get_source == "file":
+                tile.configure(fg_color=("gray88", "gray19"), hover_color=("gray85", "gray21"),
+                               text_color=("gray60", "gray45"))
+            else:
+                tile.configure(**SECONDARY)
+        for wdg in self.choice_opts.winfo_children():
+            wdg.pack_forget()
+        if key == "video":
+            self.quality_label.pack(side="left", padx=(0, 8))
+            self.quality_box.pack(side="left")
+            self.choice_hint.configure(text="Higher quality = bigger file.")
+            self.get_btn.configure(text="⬇   Download video")
+        elif key == "audio":
+            self.fmt_label.pack(side="left", padx=(0, 8))
+            self.ex_fmt.pack(side="left")
+            self.choice_hint.configure(text=FORMAT_HINTS.get(self.ex_fmt.get(), ""))
+            self.get_btn.configure(text="♪   Get the audio")
+        else:
+            self.choice_hint.configure(text="The song opens in the Remix tab, ready for a style.")
+            self.get_btn.configure(text="✦   Open in Remix")
+        self.choice_hint.pack(side="left", padx=(16 if key != "remix" else 0, 0))
+        self._refresh_download_summary()
 
     def _paste_url(self):
         try:
@@ -274,224 +512,296 @@ class App(ctk.CTk):
         if d:
             var.set(d)
 
+    def _pick_get_file(self):
+        p = filedialog.askopenfilename(filetypes=[*AUDIO_TYPES[:1], *VIDEO_TYPES])
+        if p:
+            self._set_get_file(p)
+
+    def _set_get_file(self, path):
+        self.ex_src.set(path)
+        self.ex_name.configure(text=os.path.basename(path))
+        self.ex_folder.configure(text=short_path(os.path.dirname(path), 3))
+        self.dl_result.pack_forget()
+
     def _append_log(self, text):
         self.log.configure(state="normal")
         self.log.insert("end", text + "\n")
         self.log.see("end")
         self.log.configure(state="disabled")
 
-    def start_download(self):
-        url = self.url_var.get().strip()
-        if not url.startswith(("http://", "https://", "www.", "youtu")):
-            messagebox.showwarning(APP_NAME, "Please paste a valid video link first.")
+    # --- sharing: the video file itself, via the clipboard (desktop has no share sheet)
+    def _share_menu(self, anchor, saved_file: str | None = None):
+        """Menu of messengers. A link is first downloaded to a temporary folder (not your
+        Music folder), a saved file is shared as it is."""
+        import tkinter as tk
+
+        from .downloader import normalize_url
+        from .share import SHARE_APPS
+
+        url = None
+        if not saved_file:
+            url = normalize_url(self.url_var.get())
+            if not url:
+                messagebox.showinfo(APP_NAME, "Paste a video link first - Share sends that video to your friends.")
+                return
+        menu = tk.Menu(self, tearoff=0)
+        menu.add_command(label="  Send the video to ...", state="disabled")
+        for name in SHARE_APPS:
+            menu.add_command(label=f"     {name}", command=lambda n=name: self._share(n, url, saved_file))
+        menu.add_command(label="     Another app (just copy the video)", command=lambda: self._share(None, url, saved_file))
+        if url:
+            menu.add_separator()
+
+            def copy_link():
+                self.clipboard_clear()
+                self.clipboard_append(url)
+                self.set_status("Link copied - paste it anywhere.")
+            menu.add_command(label="  Copy only the link", command=copy_link)
+        try:
+            menu.tk_popup(anchor.winfo_rootx(), anchor.winfo_rooty() + anchor.winfo_height())
+        finally:
+            menu.grab_release()
+
+    def _share(self, app_name, url, saved_file):
+        from . import share
+
+        def deliver(path):
+            copied = share.copy_file_to_clipboard(path)
+            if app_name:
+                share.open_share_app(app_name)
+            where = app_name or "the app you want"
+            if copied:
+                key = "Cmd+V" if sys.platform == "darwin" else "Ctrl+V"
+                messagebox.showinfo(APP_NAME, f"The video is copied.\n\nOpen a chat in {where} and press {key} "
+                                              "to send it.")
+                self.set_status(f"Video copied - press Ctrl+V in a chat to send it ({os.path.basename(path)})", 1)
+            else:
+                open_in_explorer(path)
+                messagebox.showinfo(APP_NAME, f"Drag the selected file into a chat in {where} to send it.")
+
+        if saved_file:
+            deliver(saved_file)
             return
-        if not url.startswith("http"):
-            url = "https://" + url
-        audio_only = self.dl_mode.get() == "audio"
+        choice = self.get_choice
+        audio_only = choice != "video"
+        quality = self.quality_box.get()
+        browser = self.cookies_box.get()
+        browser = None if browser.startswith("No") else browser
+        share.clean_share_dir()
+        folder = share.share_dir()
+        self._append_log(f"--- share {url}")
+
+        def work(progress):
+            from .downloader import download
+
+            return download(url, folder, audio_only=audio_only, quality=quality, on_progress=progress,
+                            on_log=lambda m: self._queue.put(("log", m)), cookies_browser=browser)
+
+        self.run_task("Getting the video to share...", work, deliver)
+
+    # --- the main action
+    def start_get(self):
+        choice = self.get_choice
+        if self.get_source == "file":
+            src = self.ex_src.get().strip()
+            if not os.path.isfile(src):
+                messagebox.showwarning(APP_NAME, "Please choose a file first (button 'Choose a file...').")
+                return
+            if choice == "remix":
+                self._send_to_remix(src)
+            else:
+                self._extract_file(src)
+            return
+        from .downloader import normalize_url
+
+        url = normalize_url(self.url_var.get())
+        if not url:
+            messagebox.showwarning(APP_NAME, "Please paste a video link first.\n\n"
+                                             "Copy it from the app or browser (Share -> Copy link), then press 'Paste'.")
+            return
+        self.url_var.set(url)
+        self._download(url, choice)
+
+    def _download(self, url, choice):
+        audio_only = choice != "video"
+        fmt = self.ex_fmt.get() if choice == "audio" else "mp3"
         quality = self.quality_box.get()
         browser = self.cookies_box.get()
         browser = None if browser.startswith("No") else browser
         out_dir = self.dl_dir.get().strip() or default_out_dir()
         self._append_log(f"--- {url}")
-        self.dl_resume.configure(state="disabled", fg_color="gray30")
+        self.dl_resume.pack_forget()
+        self.dl_result.pack_forget()
 
         def work(progress):
             from .downloader import download
 
-            return download(url, out_dir, audio_only=audio_only, quality=quality,
+            path = download(url, out_dir, audio_only=audio_only, quality=quality,
                             on_progress=progress, on_log=lambda m: self._queue.put(("log", m)),
                             cookies_browser=browser)
+            if audio_only and not path.lower().endswith("." + fmt):
+                progress(1.0, f"Converting to {fmt.upper()}...")
+                out = os.path.splitext(path)[0] + "." + fmt
+                extract_audio(path, out)
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+                path = out
+            return path
 
         def done(path):
             self.last_download = path
             self._append_log(f"Saved: {path}")
-            self.set_status(f"Downloaded: {os.path.basename(path)}", 1)
-            for btn in (self.dl_open, self.dl_to_remix):
-                btn.configure(state="normal")
-            self.dl_to_extract.configure(state="disabled" if audio_only else "normal")
+            if choice == "remix":
+                self.set_status(f"Downloaded {os.path.basename(path)} - opening it in Remix...", 1)
+                self._send_to_remix(path)
+                return
+            self.set_status(f"Saved: {os.path.basename(path)}", 1)
+            self._show_result(path)
 
         def failed(exc):
+            self.dl_log_card.toggle(True)
             if getattr(exc, "resumable", False):
-                self.dl_resume.configure(state="normal", fg_color="#2e7d32")
+                self.dl_resume.pack(side="left", padx=(10, 0), after=self.get_btn)
                 self._append_log("Download paused. The downloaded part is kept - press 'Resume' to continue.")
                 self.set_status("Download paused - press Resume to continue.", None)
 
         self.run_task("Starting download...", work, done, failed)
 
-    def _download_to_extract(self):
-        self.ex_src.set(self.last_download)
-        self._suggest_extract_out()
-        self.tabs.set("  2. Extract audio  ")
-
-    # ------------------------------------------------------------ tab 2: extract
-    def _build_extract(self, tab):
-        card = Section(tab, "Separate audio from video", "Save the sound of any video as a standalone audio file")
-        card.pack(fill="x", padx=6, pady=6)
-        b = card.body
-        b.grid_columnconfigure(1, weight=1)
-        self.ex_src = ctk.StringVar()
-        self.ex_out = ctk.StringVar()
-        self._file_row(b, "Video file", self.ex_src, self._pick_extract_src, row=0)
-        ctk.CTkLabel(b, text="Audio format", anchor="w", width=120).grid(row=1, column=0, sticky="w", pady=6)
-        self.ex_fmt = ctk.CTkSegmentedButton(b, values=list(EXPORT_FORMATS),
-                                             command=lambda v: self._suggest_extract_out(),
-                                             selected_color=ACCENT)
-        self.ex_fmt.set("mp3")
-        self.ex_fmt.grid(row=1, column=1, sticky="w", padx=8)
-        self._file_row(b, "Save as", self.ex_out, self._pick_extract_out, row=2)
-
-        hint = ("mp3 = small & universal   •   wav = lossless, big   •   flac = lossless, compressed   "
-                "•   m4a/ogg = efficient")
-        ctk.CTkLabel(b, text=hint, text_color=MUTED).grid(row=3, column=1, sticky="w", padx=8)
-
-        actions = ctk.CTkFrame(b, fg_color="transparent")
-        actions.grid(row=4, column=0, columnspan=3, sticky="w", pady=(14, 4))
-        ctk.CTkButton(actions, text="♪  Extract audio", height=44, width=200, fg_color=ACCENT,
-                      font=ctk.CTkFont(size=15, weight="bold"),
-                      command=self.start_extract).pack(side="left")
-        self.ex_open = ctk.CTkButton(actions, text="Open folder", height=44, width=130, state="disabled",
-                                     fg_color="gray30", hover_color="gray25",
-                                     command=lambda: open_in_explorer(self.last_extract))
-        self.ex_open.pack(side="left", padx=8)
-        self.ex_to_remix = ctk.CTkButton(actions, text="→ Remix it", height=44, width=130, state="disabled",
-                                         fg_color="gray30", hover_color="gray25",
-                                         command=lambda: self._send_to_remix(self.last_extract))
-        self.ex_to_remix.pack(side="left", padx=8)
-
-    def _pick_extract_src(self):
-        p = filedialog.askopenfilename(filetypes=VIDEO_TYPES)
-        if p:
-            self.ex_src.set(p)
-            self._suggest_extract_out()
-
-    def _suggest_extract_out(self):
-        src = self.ex_src.get()
-        if src:
-            self.ex_out.set(os.path.splitext(src)[0] + "." + self.ex_fmt.get())
-
-    def _pick_extract_out(self):
+    def _extract_file(self, src):
         fmt = self.ex_fmt.get()
-        p = filedialog.asksaveasfilename(defaultextension="." + fmt, filetypes=[(fmt.upper(), "*." + fmt)],
-                                         initialfile=os.path.basename(self.ex_out.get()))
-        if p:
-            self.ex_out.set(p)
-
-    def start_extract(self):
-        src, out = self.ex_src.get().strip(), self.ex_out.get().strip()
-        if not os.path.isfile(src):
-            messagebox.showwarning(APP_NAME, "Please choose a video file first.")
-            return
-        if not out:
-            self._suggest_extract_out()
-            out = self.ex_out.get()
-        ext = os.path.splitext(out)[1].lower().lstrip(".")
-        if ext not in EXPORT_FORMATS:
-            out = os.path.splitext(out)[0] + "." + self.ex_fmt.get()
-            self.ex_out.set(out)
+        out = os.path.splitext(src)[0] + "." + fmt
         if os.path.abspath(out) == os.path.abspath(src):
-            messagebox.showwarning(APP_NAME, "The output file must be different from the video file.")
-            return
+            out = os.path.splitext(src)[0] + " (audio)." + fmt
 
         def work(progress):
-            progress(0.3, "Extracting audio...")
+            progress(0.3, "Taking the audio out...")
             extract_audio(src, out)
             return out
 
         def done(path):
-            self.last_extract = path
+            self.last_download = path
             self.set_status(f"Audio saved: {path}", 1)
-            self.ex_open.configure(state="normal")
-            self.ex_to_remix.configure(state="normal")
+            self._show_result(path)
 
-        self.run_task("Extracting audio...", work, done)
+        self.run_task("Taking the audio out...", work, done)
+
+    def _show_result(self, path):
+        self.last_extract = path
+        self.dl_result_label.configure(text=f"✓  Saved {os.path.basename(path)}")
+        self.dl_result.pack(fill="x", pady=(14, 0))
 
     # ------------------------------------------------------------ tab 3: remix
     def _build_remix(self, tab):
-        from .dsp import EQ_LABELS, EQ_PRESETS, REMIX_PRESETS
+        from .dsp import AMBIENCE, EQ_LABELS, EQ_PRESETS, REMIX_PRESETS
 
-        top = ctk.CTkFrame(tab, corner_radius=12)
-        top.pack(fill="x", padx=6, pady=(6, 4))
-        top.grid_columnconfigure(1, weight=1)
         self.rx_src = ctk.StringVar()
-        ctk.CTkLabel(top, text="Track", font=ctk.CTkFont(weight="bold"), width=60).grid(
-            row=0, column=0, padx=(14, 4), pady=10)
-        ctk.CTkEntry(top, textvariable=self.rx_src, height=36,
-                     placeholder_text="Choose an audio or video file...").grid(row=0, column=1, sticky="ew", padx=6)
-        ctk.CTkButton(top, text="Open...", width=100, height=36, fg_color=ACCENT,
-                      command=self._pick_remix_src).grid(row=0, column=2, padx=(4, 14))
-
-        info = ctk.CTkFrame(top, fg_color="transparent")
-        info.grid(row=1, column=0, columnspan=3, sticky="ew", padx=14, pady=(0, 10))
-        big = ctk.CTkFont(size=15, weight="bold")
-        self.lbl_key = ctk.CTkLabel(info, text="Key: –", font=big)
-        self.lbl_key.pack(side="left", padx=(0, 22))
-        self.lbl_bpm = ctk.CTkLabel(info, text="BPM: –", font=big)
-        self.lbl_bpm.pack(side="left", padx=(0, 22))
-        self.lbl_len = ctk.CTkLabel(info, text="Length: –", font=big)
-        self.lbl_len.pack(side="left", padx=(0, 22))
-        self.lbl_alt = ctk.CTkLabel(info, text="", text_color=MUTED)
-        self.lbl_alt.pack(side="left")
-        ctk.CTkButton(info, text="Reset all", width=90, fg_color="gray30", hover_color="gray25",
-                      command=self.reset_remix).pack(side="right")
-        self.preset_box = ctk.CTkComboBox(info, values=["— One-click remix presets —", *REMIX_PRESETS],
-                                          width=250, state="readonly", command=self.apply_remix_preset)
-        self.preset_box.set("— One-click remix presets —")
-        self.preset_box.pack(side="right", padx=8)
-
-        # bottom action bar (packed before the scroll area so it is always visible)
-        act = ctk.CTkFrame(tab, corner_radius=12)
-        act.pack(fill="x", side="bottom", padx=6, pady=(4, 6))
-        ctk.CTkLabel(act, text="Preview from").pack(side="left", padx=(14, 6), pady=10)
-        self.preview_from = ctk.CTkEntry(act, width=70)
-        self.preview_from.insert(0, "0:30")
-        self.preview_from.pack(side="left")
-        ctk.CTkButton(act, text="▶  Preview", width=120, height=38, fg_color="#2e7d32", hover_color="#1b5e20",
-                      command=self.preview).pack(side="left", padx=(10, 4))
-        ctk.CTkButton(act, text="■  Stop", width=90, height=38, fg_color="gray30", hover_color="gray25",
-                      command=lambda: self.player.stop()).pack(side="left", padx=4)
-        ctk.CTkButton(act, text="▶ Original", width=100, height=38, fg_color="gray30", hover_color="gray25",
-                      command=lambda: self.preview(original=True)).pack(side="left", padx=4)
-        self.export_btn = ctk.CTkButton(act, text="💾  Export remix", width=170, height=38, fg_color=ACCENT,
-                                        font=ctk.CTkFont(size=14, weight="bold"), command=self.export)
-        self.export_btn.pack(side="right", padx=14)
-        self.export_fmt = ctk.CTkComboBox(act, values=list(EXPORT_FORMATS), width=80, state="readonly")
-        self.export_fmt.set("mp3")
-        self.export_fmt.pack(side="right")
-        ctk.CTkLabel(act, text="Format").pack(side="right", padx=6)
-
-        scroll = ctk.CTkScrollableFrame(tab, corner_radius=12, fg_color="transparent")
-        scroll.pack(fill="both", expand=True, padx=0, pady=0)
         self.vars: dict[str, ctk.Variable] = {}
 
+        # --- empty state: shown until a song is loaded
+        self.rx_empty = ctk.CTkFrame(tab, corner_radius=16, fg_color=CARD)
+        inner = ctk.CTkFrame(self.rx_empty, fg_color="transparent")
+        inner.place(relx=0.5, rely=0.45, anchor="center")
+        logo = load_logo(84)
+        ctk.CTkLabel(inner, text="" if logo else "♫", image=logo, font=font(60)).pack(pady=(0, 10))
+        ctk.CTkLabel(inner, text="Open a song to start remixing", font=font(22, "bold")).pack()
+        ctk.CTkLabel(inner, text="MP3, WAV, FLAC, M4A, OGG ... or any video file.\n"
+                                 "EasyRemix finds its key and tempo, then you pick a style.",
+                     text_color=MUTED, font=font(14), justify="center").pack(pady=(6, 18))
+        primary_button(inner, "Open a song...", self._pick_remix_src, width=240).pack()
+        self.rx_empty.pack(fill="both", expand=True, padx=6, pady=6)
+
+        # --- loaded state
+        self.rx_main = ctk.CTkFrame(tab, fg_color="transparent")
+
+        top = ctk.CTkFrame(self.rx_main, corner_radius=14, fg_color=CARD)
+        top.pack(fill="x", padx=6, pady=(6, 6))
+        top.grid_columnconfigure(0, weight=1)
+        self.rx_title = ctk.CTkLabel(top, text="", font=font(17, "bold"), anchor="w")
+        self.rx_title.grid(row=0, column=0, sticky="w", padx=16, pady=(12, 2))
+        pills = ctk.CTkFrame(top, fg_color="transparent")
+        pills.grid(row=1, column=0, sticky="w", padx=16, pady=(4, 12))
+        self.lbl_key = pill(pills, "Key –")
+        self.lbl_key.pack(side="left", padx=(0, 8))
+        self.lbl_bpm = pill(pills, "– BPM")
+        self.lbl_bpm.pack(side="left", padx=(0, 8))
+        self.lbl_len = pill(pills, "0:00")
+        self.lbl_len.pack(side="left", padx=(0, 12))
+        self.lbl_alt = ctk.CTkLabel(pills, text="", text_color=MUTED)
+        self.lbl_alt.pack(side="left")
+        btns = ctk.CTkFrame(top, fg_color="transparent")
+        btns.grid(row=0, column=1, rowspan=2, padx=16)
+        secondary_button(btns, "Open another...", self._pick_remix_src, width=140).pack(side="left", padx=4)
+        secondary_button(btns, "Reset all", self.reset_remix, width=100).pack(side="left", padx=4)
+
+        # action bar (packed before the scroll area so it is always visible)
+        act = ctk.CTkFrame(self.rx_main, corner_radius=14, fg_color=CARD)
+        act.pack(fill="x", side="bottom", padx=6, pady=(6, 6))
+        ctk.CTkLabel(act, text="Listen from", font=font(13)).pack(side="left", padx=(16, 6), pady=12)
+        self.preview_from = ctk.CTkEntry(act, width=64, height=38, justify="center")
+        self.preview_from.insert(0, "0:30")
+        self.preview_from.pack(side="left")
+        ctk.CTkButton(act, text="▶  Preview remix", width=150, height=40, font=font(14, "bold"),
+                      command=self.preview, **PLAY).pack(side="left", padx=(10, 4))
+        secondary_button(act, "▶  Original", lambda: self.preview(original=True), width=110, height=40).pack(
+            side="left", padx=4)
+        secondary_button(act, "■  Stop", lambda: self.player.stop(), width=80, height=40).pack(side="left", padx=4)
+        self.export_btn = primary_button(act, "Export remix", self.export, width=190, height=42)
+        self.export_btn.pack(side="right", padx=16)
+        self.export_fmt = ctk.CTkComboBox(act, values=list(EXPORT_FORMATS), width=84, height=38, state="readonly")
+        self.export_fmt.set("mp3")
+        self.export_fmt.pack(side="right")
+        ctk.CTkLabel(act, text="as", font=font(13)).pack(side="right", padx=8)
+
+        scroll = ctk.CTkScrollableFrame(self.rx_main, corner_radius=0, fg_color="transparent")
+        scroll.pack(fill="both", expand=True)
+        self._cards: dict[str, Card] = {}
+
+        # --- one-click styles
+        pc = Card(scroll, "1   Pick a style", "one click sets everything - then press Preview")
+        pc.pack(fill="x", padx=6, pady=6)
+        grid = ctk.CTkFrame(pc.body, fg_color="transparent")
+        grid.pack(fill="x")
+        self.preset_buttons: dict[str, ctk.CTkButton] = {}
+        cols = 5
+        for i, name in enumerate(REMIX_PRESETS):
+            grid.grid_columnconfigure(i % cols, weight=1, uniform="presets")
+            btn = ctk.CTkButton(grid, text=name, height=38, corner_radius=19, font=font(13, "bold"),
+                                command=lambda n=name: self.apply_remix_preset(n), **SECONDARY)
+            btn.grid(row=i // cols, column=i % cols, sticky="ew", padx=4, pady=4)
+            self.preset_buttons[name] = btn
+
         # --- speed & pitch
-        sp = Section(scroll, "Speed & Pitch",
-                     "Slow down / speed up. Classic mode changes pitch too, like a record player.")
+        sp = Card(scroll, "2   Speed & pitch", "slower = deeper, faster = brighter (like a record player)")
         sp.pack(fill="x", padx=6, pady=6)
         b = sp.body
         b.grid_columnconfigure(1, weight=1)
         self._slider(b, 0, "speed", "Speed", 0.5, 1.5, 1.0, lambda v: f"x{v:.3f}", steps=1000)
-        self._slider(b, 1, "pitch_semitones", "Extra pitch", -12, 12, 0.0, lambda v: f"{v:+.1f} st", steps=48)
-        self.vars["keep_pitch"] = ctk.BooleanVar(value=False)
-        ctk.CTkSwitch(b, text="Keep original pitch (change tempo only - time-stretch)",
-                      variable=self.vars["keep_pitch"], progress_color=ACCENT,
-                      command=self._update_speed_info).grid(row=2, column=1, sticky="w", pady=4)
-        self.speed_info = ctk.CTkLabel(b, text="", anchor="w", justify="left",
-                                       font=ctk.CTkFont(size=13, weight="bold"))
-        self.speed_info.grid(row=3, column=0, columnspan=3, sticky="w", pady=(6, 2))
-
-        ctk.CTkLabel(b, text="Best speeds (always land exactly on a real key, so the song stays in tune):",
-                     anchor="w", text_color=MUTED).grid(row=4, column=0, columnspan=3, sticky="w", pady=(10, 4))
+        self.speed_info = ctk.CTkLabel(b, text="", anchor="w", justify="left", font=font(13, "bold"))
+        self.speed_info.grid(row=1, column=0, columnspan=3, sticky="w", pady=(2, 10))
+        ctk.CTkLabel(b, text="Speeds that keep the song in tune  (★ = how good it usually sounds)",
+                     anchor="w", text_color=MUTED).grid(row=2, column=0, columnspan=3, sticky="w", pady=(0, 6))
         self.sugg_frame = ctk.CTkFrame(b, fg_color="transparent")
-        self.sugg_frame.grid(row=5, column=0, columnspan=3, sticky="ew")
+        self.sugg_frame.grid(row=3, column=0, columnspan=3, sticky="ew")
+        self.sugg_why = ctk.CTkLabel(b, text="", anchor="w", justify="left", text_color=MUTED, wraplength=900)
+        self.sugg_why.grid(row=4, column=0, columnspan=3, sticky="w", pady=(6, 8))
+        self._slider(b, 5, "pitch_semitones", "Extra pitch", -12, 12, 0.0, lambda v: f"{v:+.1f} st", steps=48)
+        self.vars["keep_pitch"] = ctk.BooleanVar(value=False)
+        ctk.CTkSwitch(b, text="Keep the original pitch (change only the tempo)",
+                      variable=self.vars["keep_pitch"], progress_color=ACCENT,
+                      command=self._update_speed_info).grid(row=6, column=1, sticky="w", pady=4)
+        self._suggestion_chips: list[tuple[ctk.CTkButton, float]] = []
         self._render_suggestions()
 
-        # --- equalizer
-        eq = Section(scroll, "Equalizer", "10-band graphic EQ, ±12 dB")
+        # --- equalizer (folded)
+        eq = Card(scroll, "Equalizer", "bass, mids and treble", collapsible=True, start_open=False)
         eq.pack(fill="x", padx=6, pady=6)
+        self._cards["eq"] = eq
         row = ctk.CTkFrame(eq.body, fg_color="transparent")
         row.pack(fill="x")
         ctk.CTkLabel(row, text="Preset").pack(side="left")
-        self.eq_preset = ctk.CTkComboBox(row, values=list(EQ_PRESETS), width=240, state="readonly",
+        self.eq_preset = ctk.CTkComboBox(row, values=list(EQ_PRESETS), width=260, state="readonly",
                                          command=self.apply_eq_preset)
         self.eq_preset.set("Flat")
         self.eq_preset.pack(side="left", padx=8)
@@ -506,15 +816,18 @@ class App(ctk.CTk):
             val.grid(row=0, column=i)
             s = ctk.CTkSlider(bands, from_=-12, to=12, number_of_steps=48, orientation="vertical",
                               height=150, variable=var, progress_color=ACCENT, button_color=ACCENT,
-                              command=lambda v, idx=i: self._eq_changed(idx))
+                              button_hover_color=ACCENT_HOVER, command=lambda v, idx=i: self._eq_changed(idx))
             s.grid(row=1, column=i, pady=4)
             ctk.CTkLabel(bands, text=lab).grid(row=2, column=i)
             self.eq_vars.append(var)
             self.eq_value_labels.append(val)
+        ctk.CTkLabel(eq.body, text="Left = bass, right = treble. Up = louder, down = quieter (±12 dB).",
+                     text_color=MUTED).pack(anchor="w", pady=(6, 0))
 
-        # --- effects
-        fx = Section(scroll, "Effects", "Drag a slider above 0 to switch an effect on")
+        # --- effects (folded)
+        fx = Card(scroll, "Effects", "reverb, echo, lo-fi, 8D ...", collapsible=True, start_open=False)
         fx.pack(fill="x", padx=6, pady=6)
+        self._cards["fx"] = fx
         b = fx.body
         b.grid_columnconfigure(1, weight=1)
         b.grid_columnconfigure(4, weight=1)
@@ -528,7 +841,7 @@ class App(ctk.CTk):
         ]
         right = [
             ("chorus_mix", "Chorus", 0, 1, 0.0, pct),
-            ("lofi_amount", "Lo-Fi / bitcrush", 0, 1, 0.0, pct),
+            ("lofi_amount", "Lo-Fi", 0, 1, 0.0, pct),
             ("distortion_db", "Distortion", 0, 30, 0.0, lambda v: f"{v:.0f} dB"),
             ("rotate_8d", "8D rotation", 0, 1, 0.0, pct),
             ("rotate_speed", "  Rotation speed", 0.03, 0.5, 0.12, lambda v: f"{v:.2f} Hz"),
@@ -537,21 +850,25 @@ class App(ctk.CTk):
             self._slider(b, r, *spec, col=0)
         for r, spec in enumerate(right):
             self._slider(b, r, *spec, col=3)
+        ctk.CTkLabel(b, text="Drag a slider above 0 to switch an effect on. 8D sounds best with headphones.",
+                     text_color=MUTED).grid(row=5, column=0, columnspan=6, sticky="w", pady=(6, 0))
 
-        # --- ambience
-        amb = Section(scroll, "Ambience layers", "Mix atmospheric sounds under the music (generated, royalty-free)")
+        # --- ambience (folded)
+        amb = Card(scroll, "Ambience", "rain, vinyl, ocean ... under the music", collapsible=True, start_open=False)
         amb.pack(fill="x", padx=6, pady=6)
+        self._cards["amb"] = amb
         b = amb.body
         b.grid_columnconfigure(1, weight=1)
         b.grid_columnconfigure(4, weight=1)
-        from .dsp import AMBIENCE
-
         for i, (attr, (label, _)) in enumerate(AMBIENCE.items()):
             self._slider(b, i % 3, attr, label, 0, 1, 0.0, pct, col=0 if i < 3 else 3)
+        ctk.CTkLabel(b, text="All sounds are generated by EasyRemix, so they are royalty-free.",
+                     text_color=MUTED).grid(row=3, column=0, columnspan=6, sticky="w", pady=(6, 0))
 
-        # --- volume
-        vol = Section(scroll, "Volume & Output")
+        # --- volume (folded)
+        vol = Card(scroll, "Volume & fades", collapsible=True, start_open=False)
         vol.pack(fill="x", padx=6, pady=6)
+        self._cards["vol"] = vol
         b = vol.body
         b.grid_columnconfigure(1, weight=1)
         b.grid_columnconfigure(4, weight=1)
@@ -559,35 +876,76 @@ class App(ctk.CTk):
         self._slider(b, 0, "fade_in", "Fade in", 0, 10, 0.0, lambda v: f"{v:.1f} s", steps=40, col=3)
         self._slider(b, 1, "fade_out", "Fade out", 0, 15, 0.0, lambda v: f"{v:.1f} s", steps=60, col=3)
         self.vars["normalize"] = ctk.BooleanVar(value=False)
-        ctk.CTkSwitch(b, text="Normalize loudness (make it as loud as modern tracks)",
-                      variable=self.vars["normalize"], progress_color=ACCENT).grid(
+        ctk.CTkSwitch(b, text="Make it as loud as modern tracks", variable=self.vars["normalize"],
+                      progress_color=ACCENT, command=self._refresh_summaries).grid(
             row=1, column=0, columnspan=3, sticky="w", pady=4)
-        ctk.CTkLabel(b, text="A built-in limiter always prevents clipping/distortion.", text_color=MUTED).grid(
-            row=2, column=0, columnspan=3, sticky="w")
+        ctk.CTkLabel(b, text="A built-in limiter always prevents clipping and distortion.", text_color=MUTED).grid(
+            row=2, column=0, columnspan=6, sticky="w")
 
         self._update_speed_info()
+        self._refresh_summaries()
 
     def _slider(self, parent, row, attr, label, lo, hi, default, fmt, steps=200, col=0):
         var = ctk.DoubleVar(value=default)
         self.vars[attr] = var
-        ctk.CTkLabel(parent, text=label, anchor="w", width=130).grid(row=row, column=col, sticky="w", pady=3)
-        val = ctk.CTkLabel(parent, text=fmt(default), width=80, anchor="e")
+        ctk.CTkLabel(parent, text=label, anchor="w", width=130).grid(row=row, column=col, sticky="w", pady=4)
+        val = ctk.CTkLabel(parent, text=fmt(default), width=80, anchor="e", font=font(13, "bold"))
 
         def changed(v):
             val.configure(text=fmt(float(v)))
             if attr in ("speed", "pitch_semitones"):
                 self._update_speed_info()
+            self._mark_custom()
+            self._refresh_summaries()
 
         s = ctk.CTkSlider(parent, from_=lo, to=hi, number_of_steps=steps, variable=var,
-                          progress_color=ACCENT, button_color=ACCENT, command=changed)
-        s.grid(row=row, column=col + 1, sticky="ew", padx=8, pady=3)
+                          progress_color=ACCENT, button_color=ACCENT, button_hover_color=ACCENT_HOVER,
+                          command=changed)
+        s.grid(row=row, column=col + 1, sticky="ew", padx=8, pady=4)
         val.grid(row=row, column=col + 2, sticky="e", padx=(0, 18))
         var.trace_add("write", lambda *_: val.configure(text=fmt(var.get())))
+
+    # --- summaries in the folded card headers
+    def _refresh_summaries(self, *_):
+        if not getattr(self, "_cards", None) or "vol" not in self._cards:
+            return
+        v = {k: var.get() for k, var in self.vars.items()}
+        self._cards["eq"].set_summary(self.eq_preset.get())
+        names = [("reverb_mix", "Reverb"), ("echo_mix", "Echo"), ("chorus_mix", "Chorus"),
+                 ("lofi_amount", "Lo-Fi"), ("distortion_db", "Distortion"), ("rotate_8d", "8D")]
+        on = [n for k, n in names if v.get(k, 0) > (0.1 if k == "distortion_db" else 0.01)]
+        self._cards["fx"].set_summary(", ".join(on) if on else "off")
+        from .dsp import AMBIENCE
+
+        amb = [label.split(" ")[0] for k, (label, _) in AMBIENCE.items() if v.get(k, 0) > 0.005]
+        self._cards["amb"].set_summary(", ".join(amb) if amb else "off")
+        parts = []
+        if abs(v.get("volume_db", 0)) > 0.05:
+            parts.append(f"{v['volume_db']:+.1f} dB")
+        if v.get("normalize"):
+            parts.append("loud")
+        if v.get("fade_in", 0) > 0 or v.get("fade_out", 0) > 0:
+            parts.append("fades")
+        self._cards["vol"].set_summary(", ".join(parts) if parts else "unchanged")
+
+    def _mark_custom(self):
+        if not self._loading_preset and self.current_preset:
+            self._highlight_preset("")
+
+    def _highlight_preset(self, name: str):
+        self.current_preset = name
+        for n, btn in self.preset_buttons.items():
+            if n == name:
+                btn.configure(fg_color=ACCENT, hover_color=ACCENT_HOVER, text_color="white")
+            else:
+                btn.configure(**SECONDARY)
 
     def _eq_changed(self, idx):
         self.eq_value_labels[idx].configure(text=f"{self.eq_vars[idx].get():+.0f}")
         if not self._loading_preset:
             self.eq_preset.set("Custom")
+            self._mark_custom()
+        self._refresh_summaries()
 
     def apply_eq_preset(self, name):
         from .dsp import EQ_PRESETS
@@ -595,16 +953,25 @@ class App(ctk.CTk):
         gains = EQ_PRESETS.get(name)
         if gains is None:
             return
+        self._set_eq(gains, name)
+        if not self._loading_preset:
+            self._mark_custom()
+
+    def _set_eq(self, gains, name):
+        was = self._loading_preset
         self._loading_preset = True
         for var, lab, g in zip(self.eq_vars, self.eq_value_labels, gains):
             var.set(g)
             lab.configure(text=f"{g:+.0f}")
-        self._loading_preset = False
+        self._loading_preset = was
         self.eq_preset.set(name)
+        self._refresh_summaries()
 
-    def _set_speed(self, speed: float):
+    def _set_speed(self, speed: float, why: str = ""):
         self.vars["speed"].set(speed)
         self.vars["keep_pitch"].set(False)
+        self.sugg_why.configure(text=why)
+        self._mark_custom()
         self._update_speed_info()
 
     def _update_speed_info(self):
@@ -613,41 +980,47 @@ class App(ctk.CTk):
         speed = self.vars["speed"].get()
         pitch = self.vars["pitch_semitones"].get()
         text = describe_speed(speed, self.key, self.bpm, self.vars["keep_pitch"].get(), pitch)
-        color = ("#c62828", "#ff8a80") if "OUT OF TUNE" in text else ("#2e7d32", "#81c784")
-        self.speed_info.configure(text=text, text_color=color)
+        out_of_tune = "OUT OF TUNE" in text
+        self.speed_info.configure(text=("⚠  " if out_of_tune else "✓  ") + text.replace("  |  ", "   ·   "),
+                                  text_color=BAD if out_of_tune else GOOD)
+        for chip, chip_speed in getattr(self, "_suggestion_chips", []):
+            if abs(chip_speed - speed) < 5e-4:
+                chip.configure(fg_color=ACCENT, hover_color=ACCENT_HOVER, text_color="white", border_width=0)
+            else:
+                chip.configure(**SECONDARY, border_width=0)
 
     def _render_suggestions(self):
         for w in self.sugg_frame.winfo_children():
             w.destroy()
-        f = self.sugg_frame
-        headers = ["", "Rating", "Style", "Speed", "Pitch", "New key", "BPM", "Why"]
-        for c, h in enumerate(headers):
-            ctk.CTkLabel(f, text=h, font=ctk.CTkFont(weight="bold"), text_color=MUTED).grid(
-                row=0, column=c, sticky="w", padx=6)
-        f.grid_columnconfigure(7, weight=1)
-        for r, s in enumerate(speed_suggestions(self.key, self.bpm), start=1):
-            ctk.CTkButton(f, text="Use", width=54, height=26, fg_color=ACCENT,
-                          command=lambda sp=s.speed: self._set_speed(sp)).grid(row=r, column=0, padx=6, pady=2)
-            ctk.CTkLabel(f, text="★" * s.stars + "☆" * (5 - s.stars), text_color="#ffb300").grid(
-                row=r, column=1, sticky="w", padx=6)
-            ctk.CTkLabel(f, text=s.label).grid(row=r, column=2, sticky="w", padx=6)
-            ctk.CTkLabel(f, text=f"x{s.speed:.3f}").grid(row=r, column=3, sticky="w", padx=6)
-            ctk.CTkLabel(f, text=f"{s.semitones:+d} st").grid(row=r, column=4, sticky="w", padx=6)
-            key_txt = f"{s.new_key.short} ({s.new_key.camelot})" if s.new_key else "load a track"
-            ctk.CTkLabel(f, text=key_txt).grid(row=r, column=5, sticky="w", padx=6)
-            ctk.CTkLabel(f, text=f"{s.new_bpm:.0f}" if s.new_bpm else "–").grid(row=r, column=6, sticky="w", padx=6)
-            ctk.CTkLabel(f, text=s.description, text_color=MUTED, anchor="w", justify="left",
-                         wraplength=560).grid(row=r, column=7, sticky="w", padx=6)
+        self._suggestion_chips = []
+        cols = 4
+        for i, s in enumerate(speed_suggestions(self.key, self.bpm)):
+            self.sugg_frame.grid_columnconfigure(i % cols, weight=1, uniform="sugg")
+            detail = f"x{s.speed:.3f}   {s.semitones:+d} st"
+            if s.new_key:
+                detail += f"   {s.new_key.short}"
+            if s.new_bpm:
+                detail += f"   {s.new_bpm:.0f} BPM"
+            text = f"{'★' * s.stars}{'☆' * (5 - s.stars)}   {s.label}\n{detail}"
+            chip = ctk.CTkButton(self.sugg_frame, text=text, height=52, corner_radius=12, font=font(13),
+                                 command=lambda sp=s.speed, d=s.description: self._set_speed(sp, d), **SECONDARY)
+            chip.grid(row=i // cols, column=i % cols, sticky="ew", padx=4, pady=4)
+            self._suggestion_chips.append((chip, s.speed))
+        self._update_speed_info()
 
     def reset_remix(self):
         from .dsp import RemixSettings
 
         defaults = RemixSettings()
+        self._loading_preset = True
         for attr, var in self.vars.items():
             var.set(getattr(defaults, attr))
-        self.apply_eq_preset("Flat")
-        self.preset_box.set("— One-click remix presets —")
+        self._set_eq([0.0] * 10, "Flat")
+        self._loading_preset = False
+        self._highlight_preset("")
+        self.sugg_why.configure(text="")
         self._update_speed_info()
+        self._refresh_summaries()
 
     def apply_remix_preset(self, name):
         from .dsp import EQ_PRESETS, REMIX_PRESETS
@@ -656,21 +1029,18 @@ class App(ctk.CTk):
         if not preset:
             return
         self.reset_remix()
+        self._loading_preset = True
         for attr, value in preset.items():
             if attr == "eq_gains":
                 match = next((k for k, v in EQ_PRESETS.items() if v == value), None)
-                self.apply_eq_preset("Flat")
-                self._loading_preset = True
-                for var, lab, g in zip(self.eq_vars, self.eq_value_labels, value):
-                    var.set(g)
-                    lab.configure(text=f"{g:+.0f}")
-                self._loading_preset = False
-                self.eq_preset.set(match or "Custom")
+                self._set_eq(value, match or "Custom")
             elif attr in self.vars:
                 self.vars[attr].set(value)
-        self.preset_box.set(name)
+        self._loading_preset = False
+        self._highlight_preset(name)
         self._update_speed_info()
-        self.set_status(f"Preset '{name}' applied - press Preview to listen.")
+        self._refresh_summaries()
+        self.set_status(f"Style '{name}' applied - press 'Preview remix' to listen.")
 
     def current_settings(self):
         from .dsp import RemixSettings
@@ -688,7 +1058,7 @@ class App(ctk.CTk):
 
     def _send_to_remix(self, path):
         if path:
-            self.tabs.set("  3. Remix  ")
+            self.tabs.set(TAB_REMIX)
             self.load_track(path)
 
     def load_track(self, path):
@@ -697,11 +1067,11 @@ class App(ctk.CTk):
         def work(progress):
             from .analysis import detect_bpm, detect_key
 
-            progress(0.1, "Loading track...")
+            progress(0.1, "Loading song...")
             audio = load_audio(path)
-            progress(0.5, "Detecting musical key...")
+            progress(0.5, "Finding the musical key...")
             key = detect_key(audio, SAMPLE_RATE)
-            progress(0.8, "Detecting tempo (BPM)...")
+            progress(0.8, "Measuring the tempo (BPM)...")
             bpm = detect_bpm(audio, SAMPLE_RATE)
             return audio, key, bpm
 
@@ -709,25 +1079,24 @@ class App(ctk.CTk):
             audio, kres, bpm = res
             self.audio, self.audio_path = audio, path
             self.key, self.bpm = kres.key, (bpm or None)
-            self.lbl_key.configure(text=f"Key: {kres.key.name}  ({kres.key.camelot})")
-            self.lbl_bpm.configure(text=f"BPM: ~{bpm:.0f}" if bpm else "BPM: –")
-            self.lbl_len.configure(text=f"Length: {fmt_time(audio.shape[1] / SAMPLE_RATE)}")
+            self.rx_title.configure(text=os.path.basename(path))
+            self.lbl_key.configure(text=f"{kres.key.name}  ·  {kres.key.camelot}")
+            self.lbl_bpm.configure(text=f"{bpm:.0f} BPM" if bpm else "– BPM")
+            self.lbl_len.configure(text=fmt_time(audio.shape[1] / SAMPLE_RATE))
             alts = ", ".join(k.short for k, _ in kres.alternatives[:2])
-            self.lbl_alt.configure(text=f"confidence {kres.confidence * 100:.0f}%  •  could also be: {alts}")
+            self.lbl_alt.configure(text=f"{kres.confidence * 100:.0f}% sure  ·  could also be {alts}")
+            if self.rx_empty.winfo_ismapped():
+                self.rx_empty.pack_forget()
+                self.rx_main.pack(fill="both", expand=True)
             self._render_suggestions()
             self._update_speed_info()
-            self.set_status(f"Loaded {os.path.basename(path)} - pick a preset or tweak the settings.", 1)
+            self.set_status(f"Loaded {os.path.basename(path)} - pick a style, then press 'Preview remix'.", 1)
 
-        self.run_task("Loading track...", work, done)
+        self.run_task("Loading song...", work, done)
 
     def _require_audio(self) -> bool:
         if self.audio is None:
-            src = self.rx_src.get().strip()
-            if src and os.path.isfile(src):
-                self.load_track(src)
-                messagebox.showinfo(APP_NAME, "The track is loading. Try again in a moment.")
-            else:
-                messagebox.showwarning(APP_NAME, "Open a track first (button 'Open...').")
+            messagebox.showwarning(APP_NAME, "Open a song first.")
             return False
         return True
 
@@ -759,19 +1128,19 @@ class App(ctk.CTk):
             try:
                 self.player.play(audio, SAMPLE_RATE)
                 what = "original" if original else "remix"
-                self.set_status(f"Playing {what} preview from {fmt_time(start)} ({PREVIEW_SECONDS}s)...", 1)
+                self.set_status(f"Playing the {what} from {fmt_time(start)} ({PREVIEW_SECONDS} s)...", 1)
             except Exception as exc:
                 messagebox.showerror(APP_NAME, str(exc))
 
-        self.run_task("Rendering preview...", work, done)
+        self.run_task("Preparing preview...", work, done)
 
     def export(self):
         if not self._require_audio():
             return
         fmt = self.export_fmt.get()
         base = os.path.splitext(os.path.basename(self.audio_path))[0]
-        suffix = self.preset_box.get()
-        suffix = "remix" if suffix.startswith("—") else suffix.lower().replace(" ", "_").replace("+", "and")
+        suffix = self.current_preset or "remix"
+        suffix = suffix.lower().replace(" ", "_").replace("+", "and")
         out = filedialog.asksaveasfilename(
             defaultextension="." + fmt, filetypes=[(fmt.upper(), "*." + fmt)],
             initialdir=os.path.dirname(self.audio_path), initialfile=f"{base} ({suffix}).{fmt}")
@@ -790,7 +1159,7 @@ class App(ctk.CTk):
 
         def done(path):
             self.set_status(f"Exported: {path}", 1)
-            if messagebox.askyesno(APP_NAME, f"Remix saved!\n\n{path}\n\nOpen the folder?"):
+            if messagebox.askyesno(APP_NAME, f"Your remix is saved!\n\n{path}\n\nOpen the folder?"):
                 open_in_explorer(path)
 
         self.run_task("Rendering remix...", work, done)
