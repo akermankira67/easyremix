@@ -36,7 +36,7 @@ android.enable_androidx = True
 android.gradle_dependencies = androidx.core:core:1.13.1
 android.add_aars = aar/easyremix-share.aar
 # p4a copies AARs into the build's libs/ folder but does not tell Gradle to look there
-android.gradle_repositories = flatDir { dirs 'libs' }
+android.add_gradle_repositories = flatDir { dirs 'libs' }
 android.debug_artifact = apk
 
 # a pinned python-for-android release, so builds don't change by themselves
