@@ -1,4 +1,4 @@
-yt-dlp[default]>=2025.11.12
+yt-dlp[default,curl-cffi]>=2025.11.12  # curl-cffi: acts like a browser (TikTok needs it)
 yt-dlp-ejs>=0.3.0
 websockets>=13  # talks to the YouTube sign-in browser window
 numpy>=1.26

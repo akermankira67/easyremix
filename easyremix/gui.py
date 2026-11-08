@@ -302,6 +302,11 @@ class App(ctk.CTk):
                     self.set_status("Done.", 1)
                     if item[1]:
                         item[1](item[2])
+                elif kind == "error" and getattr(item[2], "cancelled", False):
+                    self._busy = False
+                    self.set_status("Cancelled.", 0)
+                    if item[3]:
+                        item[3](item[2])
                 elif kind == "error":
                     self._busy = False
                     self.set_status("Something went wrong.", 0)
@@ -399,6 +404,10 @@ class App(ctk.CTk):
         self.get_btn.pack(side="left")
         self.dl_resume = ctk.CTkButton(actions, text="⟳  Resume", height=46, width=140, font=font(14, "bold"),
                                        command=self.start_get, **PLAY)
+        self.dl_cancel = ctk.CTkButton(actions, text="✕  Cancel", height=46, width=130, font=font(14, "bold"),
+                                       command=self._cancel_download, fg_color=("#d84343", "#b83232"),
+                                       hover_color=("#c23535", "#9c2626"))
+        self._cancel_event = None
         self.dl_where = ctk.CTkLabel(actions, text="", text_color=MUTED, font=font(13))
         self.dl_where.pack(side="left", padx=16)
 
@@ -574,6 +583,7 @@ class App(ctk.CTk):
         from . import share
 
         def deliver(path):
+            self._hide_cancel()
             copied = share.copy_file_to_clipboard(path)
             if app_name:
                 share.open_share_app(app_name)
@@ -594,6 +604,7 @@ class App(ctk.CTk):
         audio_only = choice != "video"
         quality = self.quality_box.get()
         login = self._youtube_cookies()
+        cancel = self._show_cancel()
         share.clean_share_dir()
         folder = share.share_dir()
         self._append_log(f"--- share {url}")
@@ -602,9 +613,13 @@ class App(ctk.CTk):
             from .downloader import download
 
             return download(url, folder, audio_only=audio_only, quality=quality, on_progress=progress,
-                            on_log=lambda m: self._queue.put(("log", m)), cookie_file=login)
+                            on_log=lambda m: self._queue.put(("log", m)), cookie_file=login, cancel=cancel)
 
         def failed(exc):
+            self._hide_cancel()
+            if getattr(exc, "cancelled", False):
+                self.set_status("Sharing cancelled.", 0)
+                return
             self._offer_youtube_sign_in(exc, lambda: self._share(app_name, url, saved_file))
 
         self.run_task("Getting the video to share...", work, deliver, failed)
@@ -641,13 +656,14 @@ class App(ctk.CTk):
         self._append_log(f"--- {url}")
         self.dl_resume.pack_forget()
         self.dl_result.pack_forget()
+        cancel = self._show_cancel()
 
         def work(progress):
             from .downloader import download
 
             path = download(url, out_dir, audio_only=audio_only, quality=quality,
                             on_progress=progress, on_log=lambda m: self._queue.put(("log", m)),
-                            cookie_file=login)
+                            cookie_file=login, cancel=cancel)
             if audio_only and not path.lower().endswith("." + fmt):
                 progress(1.0, f"Converting to {fmt.upper()}...")
                 out = os.path.splitext(path)[0] + "." + fmt
@@ -660,6 +676,7 @@ class App(ctk.CTk):
             return path
 
         def done(path):
+            self._hide_cancel()
             self.last_download = path
             self._append_log(f"Saved: {path}")
             if choice == "remix":
@@ -670,6 +687,11 @@ class App(ctk.CTk):
             self._show_result(path)
 
         def failed(exc):
+            self._hide_cancel()
+            if getattr(exc, "cancelled", False):
+                self._append_log("Download cancelled. Unfinished files were deleted.")
+                self.set_status("Download cancelled.", 0)
+                return
             self.dl_log_card.toggle(True)
             if getattr(exc, "resumable", False):
                 self.dl_resume.pack(side="left", padx=(10, 0), after=self.get_btn)
@@ -678,6 +700,23 @@ class App(ctk.CTk):
             self._offer_youtube_sign_in(exc, lambda: self._download(url, choice))
 
         self.run_task("Starting download...", work, done, failed)
+
+    # --- Cancel button (shown while a download runs)
+    def _show_cancel(self):
+        self._cancel_event = threading.Event()
+        self.dl_cancel.configure(state="normal", text="✕  Cancel")
+        self.dl_cancel.pack(side="left", padx=(10, 0), after=self.get_btn)
+        return self._cancel_event
+
+    def _hide_cancel(self):
+        self._cancel_event = None
+        self.dl_cancel.pack_forget()
+
+    def _cancel_download(self):
+        if self._cancel_event is not None:
+            self._cancel_event.set()
+            self.dl_cancel.configure(state="disabled", text="Stopping...")
+            self.set_status("Stopping the download...", None)
 
     # --- YouTube sign-in (passes "confirm you're not a bot")
     def _youtube_cookies(self):

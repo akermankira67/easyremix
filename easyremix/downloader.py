@@ -37,7 +37,14 @@ RESUME_WAITS = [5, 10, 20, 40, 60]  # seconds to wait before each automatic rest
 # Errors that will not go away by trying again
 _PERMANENT = ("unsupported url", "private video", "video unavailable", "is not available",
               "sign in to confirm", "age-restricted", "age restricted", "could not copy",
-              "cookie", "removed by the uploader", "copyright", "members-only", "join this channel")
+              "cookie", "removed by the uploader", "copyright", "members-only", "join this channel",
+              "unexpected response from webpage", "impersonat")
+
+
+class DownloadCancelled(RuntimeError):
+    """The user pressed Cancel."""
+
+    cancelled = True
 
 
 def normalize_url(text: str) -> str | None:
@@ -69,10 +76,12 @@ def is_retryable(message: str) -> bool:
 
 
 class _QuietLogger:
-    def __init__(self, on_log: Callable[[str], None] | None):
+    def __init__(self, on_log: Callable[[str], None] | None, check_cancel: Callable[[], None] = lambda: None):
         self.on_log = on_log
+        self.check_cancel = check_cancel
 
     def debug(self, msg):  # yt-dlp sends info messages through debug()
+        self.check_cancel()  # also stops the slow "extracting" phase quickly
         if self.on_log and not msg.startswith("[debug]"):
             self.on_log(msg)
 
@@ -98,20 +107,39 @@ def download(
     cookies_browser: str | None = None,
     cookie_file: str | None = None,
     resume_attempts: int = RESUME_ATTEMPTS,
-    sleep: Callable[[float], None] = time.sleep,
+    sleep: Callable[[float], None] | None = None,
+    cancel=None,
 ) -> str:
     """Download ``url`` into ``out_dir``. Returns the path of the final file.
 
     Never produces a file with holes: missing fragments are retried (with growing pauses)
     instead of skipped. If the download still fails, it is restarted automatically and
     continues from the already downloaded part (``.part`` files are kept).
+
+    ``cancel`` is a ``threading.Event``: setting it stops the download, deletes its partial
+    files and raises ``DownloadCancelled``.
     """
     import yt_dlp
 
     os.makedirs(out_dir, exist_ok=True)
     result: dict[str, str] = {}
 
+    def check_cancel():
+        if cancel is not None and cancel.is_set():
+            raise yt_dlp.utils.DownloadCancelled("Cancelled")
+
+    if sleep is None:
+        def sleep(seconds):
+            if cancel is not None:
+                cancel.wait(seconds)
+            else:
+                time.sleep(seconds)
+
     def hook(d):
+        vid = (d.get("info_dict") or {}).get("id")
+        if vid:
+            result["id"] = vid
+        check_cancel()
         if d.get("status") == "downloading" and on_progress:
             total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
             done = d.get("downloaded_bytes") or 0
@@ -136,7 +164,7 @@ def download(
         "noplaylist": True,
         "progress_hooks": [hook],
         "postprocessor_hooks": [post_hook],
-        "logger": _QuietLogger(on_log),
+        "logger": _QuietLogger(on_log, check_cancel),
         "windowsfilenames": True,
         # --- 1. never skip fragments, retry patiently instead
         "skip_unavailable_fragments": False,
@@ -188,6 +216,7 @@ def download(
     attempt = 0
     while True:
         try:
+            check_cancel()
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(url, download=True)
                 path = result.get("path")
@@ -197,7 +226,13 @@ def download(
             if audio_only and not has_ffmpeg and not path.lower().endswith(".mp3"):
                 path = _convert_to_mp3(path, on_progress)
             return path
+        except yt_dlp.utils.DownloadCancelled:
+            _remove_partial(out_dir, result.get("id"))
+            raise DownloadCancelled("Download cancelled.") from None
         except yt_dlp.utils.DownloadError as exc:
+            if cancel is not None and cancel.is_set():
+                _remove_partial(out_dir, result.get("id"))
+                raise DownloadCancelled("Download cancelled.") from None
             message = str(exc)
             if attempt >= resume_attempts or not is_retryable(message):
                 raise DownloadFailed(friendly_error(message), resumable=is_retryable(message)) from None
@@ -209,6 +244,20 @@ def download(
             if on_progress:
                 on_progress(0.0, f"Connection lost - continuing in {wait} s ({attempt}/{resume_attempts})")
             sleep(wait)
+
+
+def _remove_partial(out_dir: str, video_id: str | None) -> None:
+    """Delete the unfinished files of a cancelled download (``... [id].mp4.part`` etc.)."""
+    if not video_id:
+        return
+    tag = f"[{video_id}]"
+    for name in os.listdir(out_dir):
+        if tag in name and (".part" in name or ".temp." in name or name.endswith(".ytdl")
+                           or ".f" in name.rsplit(tag, 1)[-1]):
+            try:
+                os.remove(os.path.join(out_dir, name))
+            except OSError:
+                pass
 
 
 def _convert_to_mp3(path: str, on_progress: Callable[[float, str], None] | None) -> str:
@@ -249,6 +298,10 @@ def friendly_error(msg: str) -> str:
     elif "403" in low:
         hint = ("YouTube refused the download (HTTP 403). This happens on VPN/cloud networks or when "
                 "YouTube changes something. Try again later, without a VPN, or sign in to YouTube (Options).")
+    elif "unexpected response from webpage" in low or "impersonat" in low:
+        hint = ("The site refused to talk to EasyRemix (it only answers real browsers). "
+                "Update EasyRemix to the latest version; if it still happens, the site changed "
+                "something and a newer version is needed.")
     elif "unsupported url" in low:
         hint = "This link is not supported. Check that it is a full video link."
     elif "private video" in low or "unavailable" in low:

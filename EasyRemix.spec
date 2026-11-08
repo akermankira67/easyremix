@@ -9,7 +9,7 @@ from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_sub
 
 datas, binaries, hiddenimports = [], [], []
 
-for pkg in ("customtkinter", "pedalboard", "yt_dlp_ejs"):
+for pkg in ("customtkinter", "pedalboard", "yt_dlp_ejs", "curl_cffi"):
     d, b, h = collect_all(pkg)
     datas += d
     binaries += b

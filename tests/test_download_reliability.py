@@ -274,3 +274,27 @@ def test_android_ffmpeg_program_is_used_for_merging_video(monkeypatch):
     assert captured["ffmpeg_location"] == "/app/lib/libffmpegbin.so"
     assert captured["format"] == downloader.QUALITIES["1080p"]
     assert captured["postprocessor_args"]["merger"][-3:-1] == ["aac", "-b:a"]
+
+
+def test_tiktok_refusal_is_not_retried():
+    msg = "ERROR: [TikTok] 7685: Unexpected response from webpage request; please report this issue"
+    assert not downloader.is_retryable(msg)
+    assert "real browsers" in downloader.friendly_error(msg)
+
+
+def test_cancel_before_start_raises_cancelled(tmp_path):
+    import threading
+
+    stop = threading.Event()
+    stop.set()
+    with pytest.raises(downloader.DownloadCancelled):
+        downloader.download("https://example.com/video", str(tmp_path), cancel=stop)
+
+
+def test_cancel_removes_only_unfinished_files(tmp_path):
+    names = ["Song [abc].mp4.part", "Song [abc].f137.mp4", "Song [abc].temp.mp4", "Song [abc].mp4.ytdl",
+             "Song [abc].mp4", "Other [xyz].mp4.part"]
+    for n in names:
+        (tmp_path / n).write_text("x")
+    downloader._remove_partial(str(tmp_path), "abc")
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["Other [xyz].mp4.part", "Song [abc].mp4"]

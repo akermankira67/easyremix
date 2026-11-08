@@ -61,6 +61,17 @@ def run() -> int:
         return ", ".join(n for n, _ in ytlogin.find_browsers()) or "no browser found"
 
     check("YouTube sign-in", youtube_sign_in)
+
+    def impersonation():
+        import yt_dlp
+
+        with yt_dlp.YoutubeDL({"quiet": True}) as ydl:
+            targets = ydl._get_available_impersonate_targets()
+        if not targets:
+            raise RuntimeError("curl_cffi missing - TikTok downloads will fail")
+        return f"{len(targets)} browser profiles (TikTok)"
+
+    check("browser impersonation", impersonation)
     ok_before = ok
     check("playback library (preview only)", lambda: __import__("sounddevice").__version__)
     ok = ok_before  # preview playback is optional; exporting still works without it
