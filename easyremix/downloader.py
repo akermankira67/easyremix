@@ -96,6 +96,7 @@ def download(
     on_progress: Callable[[float, str], None] | None = None,
     on_log: Callable[[str], None] | None = None,
     cookies_browser: str | None = None,
+    cookie_file: str | None = None,
     resume_attempts: int = RESUME_ATTEMPTS,
     sleep: Callable[[float], None] = time.sleep,
 ) -> str:
@@ -157,7 +158,10 @@ def download(
         opts["ffmpeg_location"] = tools.ffmpeg_path()
     elif merger:
         opts["ffmpeg_location"] = merger
-    if cookies_browser:
+    if cookie_file and os.path.isfile(cookie_file):
+        # the YouTube login saved by "Sign in to YouTube" (see ytlogin.py)
+        opts["cookiefile"] = cookie_file
+    elif cookies_browser:
         # lets age-restricted / members-only videos work using the user's own login
         opts["cookiesfrombrowser"] = (cookies_browser.lower(),)
     deno = deno_path()
@@ -234,20 +238,24 @@ def friendly_error(msg: str) -> str:
     msg = msg.replace("ERROR: ", "").strip()
     low = msg.lower()
     if "sign in to confirm" in low or ("age" in low and "restrict" in low):
-        hint = "YouTube wants you to be signed in. Choose your browser under 'Use login from'."
+        hint = ("YouTube wants to check that you are not a bot. This happens on some networks and VPNs. "
+                "Try again later or turn the VPN off." if tools.IS_ANDROID else
+                "YouTube wants to check that you are not a bot. Sign in to YouTube once "
+                "(Options -> YouTube account -> Sign in) and try again.")
     elif any(k in low for k in ("timed out", "503", "502", "connection", "fragment", "incompleteread",
                                  "getaddrinfo", "network")):
         hint = ("The connection kept dropping, so the download was paused. Nothing broken was saved: "
                 "the downloaded part is kept. Press 'Resume' when the connection is better.")
     elif "403" in low:
         hint = ("YouTube refused the download (HTTP 403). This happens on VPN/cloud networks or when "
-                "YouTube changes something. Try again later, without a VPN, or with 'Use login from'.")
+                "YouTube changes something. Try again later, without a VPN, or sign in to YouTube (Options).")
     elif "unsupported url" in low:
         hint = "This link is not supported. Check that it is a full video link."
     elif "private video" in low or "unavailable" in low:
         hint = "The video is private, deleted or not available in your country."
     elif "could not copy" in low and "cookie" in low:
-        hint = "Close the browser completely and try again (its cookie file is locked)."
+        hint = ("The browser keeps its cookie file locked while it runs. "
+                "Use Options -> YouTube account -> Sign in instead.")
     else:
         return msg
     return f"{hint}\n\nDetails: {msg}"

@@ -13,6 +13,12 @@ A friendly app for Windows, Linux and Android with two tabs:
    - on the desktop the video is downloaded to a temporary folder and copied to the clipboard,
      the messenger opens, and Ctrl+V in a chat sends it. Temporary copies are deleted
      automatically after a few hours.
+
+   **YouTube says "Sign in to confirm you're not a bot"?** Open *Options → YouTube account →
+   Sign in*. A separate browser window (Opera, Chrome, Edge, Brave or Vivaldi) opens; sign in
+   once and EasyRemix saves the login and closes the window. It uses its own browser profile, so
+   it works even while your normal browser is open (reading a running browser's cookie file
+   fails, because Chrome, Opera and Edge keep it locked). *Sign out* deletes the saved login.
 2. **Remix** a track:
    - **Key & BPM detection**, including the Camelot code DJs use (e.g. `8A` = A minor)
    - **Speed up / slow down**, either classic (pitch changes too, like a record player: *slowed*, *nightcore*) or time-stretch (tempo only)

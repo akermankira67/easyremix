@@ -10,6 +10,7 @@ import queue
 import subprocess
 import sys
 import threading
+import time
 import traceback
 from tkinter import filedialog, messagebox
 
@@ -348,7 +349,8 @@ class App(ctk.CTk):
         self.share_link_btn.grid(row=0, column=2, padx=(10, 0))
         ctk.CTkLabel(self.link_row, text="YouTube, TikTok, Instagram, VK, X and 1000+ other sites.   "
                                          "'Send to' shares the video itself - it is not kept in your files.",
-                     text_color=MUTED).grid(row=1, column=0, sticky="w", pady=(6, 0))
+                     text_color=MUTED, wraplength=860, justify="left", anchor="w").grid(
+            row=1, column=0, columnspan=3, sticky="w", pady=(6, 0))
 
         self.file_row = ctk.CTkFrame(b, corner_radius=12, fg_color=PILL)
         self.file_row.grid_columnconfigure(1, weight=1)
@@ -369,8 +371,8 @@ class App(ctk.CTk):
         self.choice_tiles: dict[str, ctk.CTkButton] = {}
         for i, (key, title, sub) in enumerate([
             ("video", "▶   Full video", "MP4 with picture and sound"),
-            ("audio", "♪   Audio only", "just the sound, as MP3, WAV, FLAC ..."),
-            ("remix", "✦   Remix it", "take the sound straight into the Remix tab"),
+            ("audio", "♪   Audio only", "MP3, WAV, FLAC and more"),
+            ("remix", "✦   Remix it", "open the sound in Remix"),
         ]):
             tiles.grid_columnconfigure(i, weight=1, uniform="tiles")
             t = ctk.CTkButton(tiles, text=f"{title}\n{sub}", height=64, corner_radius=14, font=font(14, "bold"),
@@ -426,13 +428,19 @@ class App(ctk.CTk):
         ctk.CTkEntry(o, textvariable=self.dl_dir, height=36).grid(row=0, column=1, sticky="ew", padx=8, pady=6)
         secondary_button(o, "Change...", lambda: self._pick_dir(self.dl_dir), width=110, height=36).grid(
             row=0, column=2, pady=6)
-        ctk.CTkLabel(o, text="Use login from", width=140, anchor="w").grid(row=1, column=0, sticky="w", pady=6)
-        self.cookies_box = ctk.CTkComboBox(o, values=["No (anonymous)", "Firefox", "Edge", "Chrome", "Brave",
-                                                      "Opera"], width=170, height=36, state="readonly")
-        self.cookies_box.set("No (anonymous)")
-        self.cookies_box.grid(row=1, column=1, sticky="w", padx=8, pady=6)
-        ctk.CTkLabel(o, text="Only needed for age-restricted or members-only videos. Uses your browser's login.",
-                     text_color=MUTED).grid(row=2, column=1, columnspan=2, sticky="w", padx=8)
+        ctk.CTkLabel(o, text="YouTube account", width=140, anchor="w").grid(row=1, column=0, sticky="w", pady=6)
+        acct = ctk.CTkFrame(o, fg_color="transparent")
+        acct.grid(row=1, column=1, columnspan=2, sticky="ew", padx=8, pady=6)
+        self.yt_status = ctk.CTkLabel(acct, text="", anchor="w")
+        self.yt_status.pack(side="left")
+        self.yt_signout = secondary_button(acct, "Sign out", self._youtube_sign_out, width=100, height=36)
+        self.yt_signin = primary_button(acct, "Sign in...", self._youtube_sign_in, width=130, height=36,
+                                        font=font(13, "bold"))
+        ctk.CTkLabel(o, text="Needed when YouTube asks to confirm you're not a bot, and for age-restricted videos. "
+                             "You sign in once in a separate browser window.",
+                     text_color=MUTED, wraplength=520, justify="left").grid(row=2, column=1, columnspan=2,
+                                                                            sticky="w", padx=8)
+        self._refresh_youtube_account()
         ctk.CTkLabel(o, text="Audio taken from a file is saved next to that file.",
                      text_color=MUTED).grid(row=3, column=1, columnspan=2, sticky="w", padx=8, pady=(4, 0))
         self.dl_dir.trace_add("write", lambda *_: self._refresh_download_summary())
@@ -585,8 +593,7 @@ class App(ctk.CTk):
         choice = self.get_choice
         audio_only = choice != "video"
         quality = self.quality_box.get()
-        browser = self.cookies_box.get()
-        browser = None if browser.startswith("No") else browser
+        login = self._youtube_cookies()
         share.clean_share_dir()
         folder = share.share_dir()
         self._append_log(f"--- share {url}")
@@ -595,9 +602,12 @@ class App(ctk.CTk):
             from .downloader import download
 
             return download(url, folder, audio_only=audio_only, quality=quality, on_progress=progress,
-                            on_log=lambda m: self._queue.put(("log", m)), cookies_browser=browser)
+                            on_log=lambda m: self._queue.put(("log", m)), cookie_file=login)
 
-        self.run_task("Getting the video to share...", work, deliver)
+        def failed(exc):
+            self._offer_youtube_sign_in(exc, lambda: self._share(app_name, url, saved_file))
+
+        self.run_task("Getting the video to share...", work, deliver, failed)
 
     # --- the main action
     def start_get(self):
@@ -626,8 +636,7 @@ class App(ctk.CTk):
         audio_only = choice != "video"
         fmt = self.ex_fmt.get() if choice == "audio" else "mp3"
         quality = self.quality_box.get()
-        browser = self.cookies_box.get()
-        browser = None if browser.startswith("No") else browser
+        login = self._youtube_cookies()
         out_dir = self.dl_dir.get().strip() or default_out_dir()
         self._append_log(f"--- {url}")
         self.dl_resume.pack_forget()
@@ -638,7 +647,7 @@ class App(ctk.CTk):
 
             path = download(url, out_dir, audio_only=audio_only, quality=quality,
                             on_progress=progress, on_log=lambda m: self._queue.put(("log", m)),
-                            cookies_browser=browser)
+                            cookie_file=login)
             if audio_only and not path.lower().endswith("." + fmt):
                 progress(1.0, f"Converting to {fmt.upper()}...")
                 out = os.path.splitext(path)[0] + "." + fmt
@@ -666,8 +675,138 @@ class App(ctk.CTk):
                 self.dl_resume.pack(side="left", padx=(10, 0), after=self.get_btn)
                 self._append_log("Download paused. The downloaded part is kept - press 'Resume' to continue.")
                 self.set_status("Download paused - press Resume to continue.", None)
+            self._offer_youtube_sign_in(exc, lambda: self._download(url, choice))
 
         self.run_task("Starting download...", work, done, failed)
+
+    # --- YouTube sign-in (passes "confirm you're not a bot")
+    def _youtube_cookies(self):
+        from . import ytlogin
+
+        return ytlogin.cookie_file() if ytlogin.signed_in() else None
+
+    def _refresh_youtube_account(self):
+        from . import ytlogin
+
+        self.yt_signin.pack_forget()
+        self.yt_signout.pack_forget()
+        if ytlogin.signed_in():
+            when = time.strftime("%d %b %Y", time.localtime(ytlogin.saved_at() or time.time()))
+            self.yt_status.configure(text=f"✓  Signed in (since {when})", text_color=GOOD)
+            self.yt_signin.configure(text="Sign in again")
+            self.yt_signout.pack(side="right")
+            self.yt_signin.pack(side="right", padx=(0, 8))
+        else:
+            self.yt_status.configure(text="Not signed in", text_color=MUTED)
+            self.yt_signin.configure(text="Sign in...")
+            self.yt_signin.pack(side="right")
+
+    def _offer_youtube_sign_in(self, exc, retry):
+        """After a 'confirm you're not a bot' error: offer to sign in, then try again."""
+        low = str(exc).lower()
+        if "not a bot" not in low and "sign in" not in low and "cookie" not in low:
+            return
+        if messagebox.askyesno(APP_NAME, "Sign in to YouTube now?\n\nA browser window opens; sign in there once "
+                                         "and EasyRemix will try the download again by itself."):
+            self._youtube_sign_in(on_success=retry)
+
+    def _youtube_sign_out(self):
+        from . import ytlogin
+
+        if messagebox.askyesno(APP_NAME, "Sign out of YouTube in EasyRemix?\n\n(Your normal browser is not "
+                                         "affected.)"):
+            ytlogin.sign_out()
+            self._refresh_youtube_account()
+            self.set_status("Signed out of YouTube.", None)
+
+    def _youtube_sign_in(self, on_success=None):
+        from . import ytlogin
+
+        if self._busy:
+            messagebox.showinfo(APP_NAME, "Please wait, another task is still running.")
+            return
+        browsers = ytlogin.find_browsers()
+        if not browsers:
+            messagebox.showerror(APP_NAME, "Signing in needs Chrome, Edge, Opera, Brave or Vivaldi, "
+                                           "but none of them was found on this computer.")
+            return
+        name, exe = browsers[0]
+        if len(browsers) > 1:
+            name, exe = self._pick_browser(browsers) or (None, None)
+            if not exe:
+                return
+
+        cancelled = threading.Event()
+        dlg = ctk.CTkToplevel(self)
+        dlg.title("Sign in to YouTube")
+        dlg.geometry("460x230")
+        dlg.resizable(False, False)
+        dlg.transient(self)
+        ctk.CTkLabel(dlg, text="Sign in to YouTube", font=ctk.CTkFont(size=18, weight="bold")).pack(
+            anchor="w", padx=22, pady=(20, 6))
+        ctk.CTkLabel(dlg, text=f"A {name} window opened. Sign in to your Google / YouTube account there.\n\n"
+                               "This box closes by itself as soon as you are signed in. EasyRemix keeps the "
+                               "login in its own browser profile; your normal browser is not touched.",
+                     wraplength=410, justify="left", anchor="w").pack(anchor="w", padx=22)
+        secondary_button(dlg, "Cancel", lambda: (cancelled.set(), dlg.destroy()), width=110, height=34).pack(
+            side="bottom", anchor="e", padx=22, pady=16)
+        dlg.protocol("WM_DELETE_WINDOW", lambda: (cancelled.set(), dlg.destroy()))
+        dlg.after(150, dlg.grab_set)
+
+        def work(progress):
+            window = ytlogin.LoginWindow(exe)
+            window.open()
+            try:
+                return ytlogin.wait_for_login(window, should_stop=cancelled.is_set,
+                                              on_status=lambda m: progress(0.5, m))
+            except ytlogin.LoginCancelled:
+                if cancelled.is_set():
+                    return None  # the user pressed Cancel: no error message
+                raise
+
+        def done(path):
+            if dlg.winfo_exists():
+                dlg.destroy()
+            self._refresh_youtube_account()
+            if not path:
+                self.set_status("Sign-in cancelled.", None)
+                return
+            self.set_status("Signed in to YouTube.", 1)
+            if on_success:
+                self.after(200, on_success)
+
+        def failed(_exc):
+            if dlg.winfo_exists():
+                dlg.destroy()
+            self._refresh_youtube_account()
+
+        self.run_task("Signing in to YouTube", work, done, failed)
+
+    def _pick_browser(self, browsers):
+        """Small chooser: which browser opens the sign-in window."""
+        result = {}
+        dlg = ctk.CTkToplevel(self)
+        dlg.title("Sign in to YouTube")
+        dlg.resizable(False, False)
+        dlg.transient(self)
+        ctk.CTkLabel(dlg, text="Which browser should open for signing in?", font=ctk.CTkFont(size=15,
+                     weight="bold")).pack(anchor="w", padx=22, pady=(18, 10))
+        names = [n for n, _ in browsers]
+        box = ctk.CTkComboBox(dlg, values=names, state="readonly", width=260, height=36)
+        box.set(names[0])
+        box.pack(anchor="w", padx=22)
+
+        def ok():
+            result["pick"] = browsers[names.index(box.get())]
+            dlg.destroy()
+
+        row = ctk.CTkFrame(dlg, fg_color="transparent")
+        row.pack(fill="x", padx=22, pady=18)
+        primary_button(row, "Open", ok, width=110, height=36).pack(side="right")
+        secondary_button(row, "Cancel", dlg.destroy, width=100, height=36).pack(side="right", padx=8)
+        dlg.after(150, dlg.grab_set)
+        self.wait_window(dlg)
+        return result.get("pick")
 
     def _extract_file(self, src):
         fmt = self.ex_fmt.get()

@@ -33,6 +33,7 @@ if sys.platform.startswith("linux"):
     else:
         print("WARNING: libportaudio.so.2 not found - preview playback needs it on the target system.")
 hiddenimports += collect_submodules("yt_dlp")
+hiddenimports += collect_submodules("websockets")  # YouTube sign-in (imported lazily)
 hiddenimports += ["scipy.signal", "scipy._lib.messagestream", "PIL.ImageTk"]
 
 # deno = JavaScript runtime yt-dlp needs for YouTube (put into ./bin before building)

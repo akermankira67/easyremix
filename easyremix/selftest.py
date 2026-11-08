@@ -53,6 +53,14 @@ def run() -> int:
         return f"{Image.open(path).size} {os.path.basename(path)}"
 
     check("app logo", logo)
+
+    def youtube_sign_in():
+        __import__("websockets.sync.client")  # bundled for the sign-in window
+        from . import ytlogin
+
+        return ", ".join(n for n, _ in ytlogin.find_browsers()) or "no browser found"
+
+    check("YouTube sign-in", youtube_sign_in)
     ok_before = ok
     check("playback library (preview only)", lambda: __import__("sounddevice").__version__)
     ok = ok_before  # preview playback is optional; exporting still works without it
