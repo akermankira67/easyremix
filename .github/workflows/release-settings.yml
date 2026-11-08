@@ -1,0 +1,32 @@
+name: Release settings
+
+# Turn an existing release into a normal (latest) release or into a pre-release.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, e.g. v0.69-alpha"
+        required: true
+      prerelease:
+        description: "Mark as pre-release (unticked = normal latest release)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  edit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          if [ "${{ inputs.prerelease }}" = "true" ]; then
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --prerelease
+          else
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --prerelease=false --latest
+          fi
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json tagName,isPrerelease,url
